@@ -1,0 +1,188 @@
+{
+  "schema_version": 3,
+  "output_directory": "results",
+  "default_profile": "full",
+  "test_profiles": {
+    "TB05_LOOP_STABILITY": "full"
+  },
+  "defaults": {
+    "mos_corners": [
+      "typical",
+      "ff",
+      "ss",
+      "fs",
+      "sf"
+    ],
+    "bjt_corners": [
+      "bjt_typical",
+      "bjt_ff",
+      "bjt_ss"
+    ],
+    "res_corners": [
+      "res_typical",
+      "res_ff",
+      "res_ss"
+    ],
+    "mim_corners": [
+      "mimcap_typical",
+      "mimcap_ff",
+      "mimcap_ss"
+    ],
+    "temperatures_C": [
+      -40,
+      25,
+      125
+    ],
+    "supply_voltages_V": [
+      3.0,
+      3.3,
+      3.6,
+      4.0,
+      4.5,
+      5.0,
+      5.5
+    ],
+    "line_start_V": 3.0,
+    "line_stop_V": 5.5,
+    "line_step_V": 0.01,
+    "nominal_supply_min_V": 3.3,
+    "nominal_supply_max_V": 5.0,
+    "case_timeout_seconds": 600,
+    "parallel_jobs": 2,
+    "retain_waveforms": false,
+    "resume": true,
+    "temperature_sweep_start_C": -40,
+    "temperature_sweep_stop_C": 125,
+    "temperature_sweep_step_C": 1,
+    "loop_start_Hz": 0.01,
+    "loop_stop_Hz": 1000000000.0,
+    "loop_points_per_decade": 100,
+    "mc_samples": 100,
+    "mc_seed_start": 180000,
+    "mc_modes": [
+      "global",
+      "mismatch",
+      "combined"
+    ],
+    "noise_start_Hz": 0.1,
+    "noise_stop_Hz": 100000000.0,
+    "noise_points_per_decade": 100,
+    "noise_bands_Hz": [
+      [
+        0.1,
+        10
+      ],
+      [
+        1,
+        1000000.0
+      ]
+    ],
+    "device_screen_limits_V": {
+      "03v3": 3.3,
+      "05v0": 5.0,
+      "06v0": 6.0
+    },
+    "intrinsic_mos_name": "m0",
+    "startup_stop_s": 0.002,
+    "startup_ramp_s": 0.0001,
+    "transient_max_step_s": 2e-06,
+    "recovery_limit_s": 0.0003,
+    "recovery_observe_s": 0.002,
+    "disturbance_hold_s": 0.0005,
+    "disturbance_edge_s": 1e-06,
+    "disturbance_ramps_s": [
+      1e-06,
+      0.0001,
+      0.01
+    ],
+    "brownout_levels_V": [
+      0,
+      1,
+      2.5
+    ],
+    "brownout_durations_s": [
+      1e-05,
+      0.001
+    ],
+    "repeated_cycle_count": 3,
+    "reference_target_V": 1.194,
+    "reference_tolerance_fraction": 0.005,
+    "idd_limit_uA": 60,
+    "supply_step_levels_V": [
+      3.3,
+      5.0
+    ]
+  },
+  "profiles": {
+    "full": {},
+    "smoke": {
+      "mos_corners": [
+        "typical"
+      ],
+      "bjt_corners": [
+        "bjt_typical"
+      ],
+      "res_corners": [
+        "res_typical"
+      ],
+      "mim_corners": [
+        "mimcap_typical"
+      ],
+      "temperatures_C": [
+        25
+      ],
+      "supply_voltages_V": [
+        5.0
+      ],
+      "parallel_jobs": 1,
+      "mc_samples": 3,
+      "mc_modes": [
+        "combined"
+      ],
+      "disturbance_ramps_s": [
+        0.0001
+      ],
+      "brownout_levels_V": [
+        0,
+        2.5
+      ],
+      "brownout_durations_s": [
+        0.001
+      ]
+    },
+    "loop_smoke": {
+      "mos_corners": [
+        "typical"
+      ],
+      "bjt_corners": [
+        "bjt_typical"
+      ],
+      "res_corners": [
+        "res_typical"
+      ],
+      "mim_corners": [
+        "mimcap_typical"
+      ],
+      "temperatures_C": [
+        25
+      ],
+      "supply_voltages_V": [
+        5.0
+      ],
+      "parallel_jobs": 1,
+      "retain_waveforms": true
+    }
+  },
+  "test_overrides": {},
+  "controls": {
+    "TB01_PSRR": ".control\nset noaskquit\nset numdgt=15\nset wr_vecnames\nset wr_singlescale\nunset appendwrite\nshell mkdir -p /foss/designs/chipalooza-bandgap/individual_tests\necho TB01_PSRR_V1 > /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\necho DUT_Bandgap_Core_UNMODIFIED_TT_25C >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\necho MIM_CHARGE_COMPAT_CAP_MIM_2F0FF_NOMINAL_NO_EXTRA_LOAD >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\necho 5 V, 25 C - AC: 1 Hz to 100 MHz. Target: 60 dB minimum over 1 Hz to 1 MHz. >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\nset appendwrite\nsave v(avdd) v(vref) i(vdd)\nop\nlet OP_VREF_V=v(vref)\nlet OP_IDD_UA=-i(vdd)*1e6\nlet OP_VALID=0\nif abs(OP_VREF_V-1.194) <= 0.005*1.194\n let OP_VALID=1\nend\nset tb_op_valid=$&OP_VALID\nprint OP_VREF_V OP_IDD_UA OP_VALID >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\nac dec 100 1 100Meg\nlet H=v(vref)/v(avdd)\nlet PSRR_DB=-db(H)\nlet H_REAL=real(H)\nlet H_IMAG=imag(H)\nmeas ac PSRR_1HZ_DB find PSRR_DB at=1\nmeas ac PSRR_1KHZ_DB find PSRR_DB at=1k\nmeas ac PSRR_1MHZ_DB find PSRR_DB at=1Meg\nmeas ac PSRR_MIN_1HZ_1MHZ_DB min PSRR_DB from=1 to=1Meg\nlet PSRR_PASS=0\nif $tb_op_valid\n if PSRR_MIN_1HZ_1MHZ_DB >= 60\n  let PSRR_PASS=1\n end\nend\nprint PSRR_1HZ_DB PSRR_1KHZ_DB PSRR_1MHZ_DB PSRR_MIN_1HZ_1MHZ_DB PSRR_PASS >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\necho BEGIN_AC_DATA_FREQUENCY_HZ_PSRR_DB_H_REAL_H_IMAG >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\nwrdata /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt PSRR_DB H_REAL H_IMAG\necho END_AC_DATA >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\necho END_OF_TB01_PSRR_RUN >> /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\necho UPLOAD_THIS_FILE /foss/designs/chipalooza-bandgap/individual_tests/TB01_PSRR_UPLOAD_THIS.txt\n.endc\n",
+    "TB02_LINE_REGULATION": ".control\nset noaskquit\nset numdgt=15\nset wr_vecnames\nset wr_singlescale\nunset appendwrite\nshell mkdir -p /foss/designs/chipalooza-bandgap/individual_tests\necho TB02_LINE_REGULATION_V1 > /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\necho DUT_Bandgap_Core_UNMODIFIED_TT_25C >> /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\necho MIM_CHARGE_COMPAT_CAP_MIM_2F0FF_NOMINAL_NO_EXTRA_LOAD >> /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\necho 25 C - VDD sweep: 3.3 V to 5 V in 10 mV steps. >> /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\nset appendwrite\nsave v(avdd) v(vref) i(vdd)\ndc vdd 3.3 5 0.01\nlet VREF_V=v(vref)\nlet IDD_UA=-i(vdd)*1e6\nlet VDD_V=v(avdd)\nlet VREF_SPAN_MV=(vecmax(VREF_V)-vecmin(VREF_V))*1e3\nlet LINE_SPAN_PERCENT=VREF_SPAN_MV/1000/1.194*100\nlet LINE_SPAN_MV_PER_V=VREF_SPAN_MV/1.7\nlet LOCAL_SLOPE_MV_PER_V=deriv(VREF_V)*1e3\nlet MAX_ABS_LOCAL_SLOPE_MV_PER_V=vecmax(abs(LOCAL_SLOPE_MV_PER_V))\nlet VREF_AT_3P3V=VREF_V[0]\nlet LAST_POINT=length(VREF_V)-1\nlet VREF_AT_5V=VREF_V[LAST_POINT]\nlet ENDPOINT_SLOPE_MV_PER_V=(VREF_AT_5V-VREF_AT_3P3V)*1e3/1.7\nlet MAX_ABS_VREF_ERROR_V=vecmax(abs(VREF_V-1.194))\nlet ALL_POINTS_VALID=0\nif MAX_ABS_VREF_ERROR_V <= 0.005*1.194\n let ALL_POINTS_VALID=1\nend\nprint VREF_AT_3P3V VREF_AT_5V VREF_SPAN_MV LINE_SPAN_PERCENT LINE_SPAN_MV_PER_V ENDPOINT_SLOPE_MV_PER_V MAX_ABS_LOCAL_SLOPE_MV_PER_V ALL_POINTS_VALID >> /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\necho BEGIN_DC_DATA_VDD_V_VREF_V_IDD_UA_LOCAL_SLOPE_MV_PER_V >> /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\nwrdata /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt VREF_V IDD_UA LOCAL_SLOPE_MV_PER_V\necho END_DC_DATA >> /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\necho END_OF_TB02_LINE_REGULATION_RUN >> /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\necho UPLOAD_THIS_FILE /foss/designs/chipalooza-bandgap/individual_tests/TB02_LINE_REGULATION_UPLOAD_THIS.txt\n.endc\n",
+    "TB03_STARTUP_RESTART": ".control\nset noaskquit\nset numdgt=15\nset wr_vecnames\nset wr_singlescale\nunset appendwrite\nshell mkdir -p /foss/designs/chipalooza-bandgap/individual_tests\necho TB03_STARTUP_RESTART_V1 > /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\necho DUT_Bandgap_Core_UNMODIFIED_TT_25C >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\necho MIM_CHARGE_COMPAT_CAP_MIM_2F0FF_NOMINAL_NO_EXTRA_LOAD >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\necho 5 V, 25 C - 100 us first ramp, 500 us power-off, 1 us restart ramp. >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\nset appendwrite\nsave v(avdd) v(vref) i(vdd)\n* No UIC, forced initial state, startup kick or nodeset.\ntran 1u 6m 0 50n\nlet SIM_END_S=vecmax(time)\nprint SIM_END_S >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\nif SIM_END_S < 0.005999\n echo TRANSIENT_ABORTED_NO_VALID_COMPLETION >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\n echo UPLOAD_THIS_FILE /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\nelse\n meas tran PRE_VREF_V avg v(vref) from=3800u to=4000u\n meas tran FINAL_VREF_V avg v(vref) from=5800u to=6m\n meas tran FINAL_SUPPLY_CURRENT_A avg i(vdd) from=5800u to=6m\n let FINAL_IDD_UA=-FINAL_SUPPLY_CURRENT_A*1e6\n let REL_ERROR=abs(v(vref)-PRE_VREF_V)/(abs(PRE_VREF_V)+1e-12)\n meas tran START_MAX_REL_ERROR max REL_ERROR from=401u to=4m\n meas tran RESTART_MAX_REL_ERROR max REL_ERROR from=4801u to=6m\n meas tran START_PEAK_V max v(vref) from=0 to=4m\n meas tran RESTART_PEAK_V max v(vref) from=4500u to=6m\n meas tran FINAL_MAX_V max v(vref) from=5800u to=6m\n meas tran FINAL_MIN_V min v(vref) from=5800u to=6m\n let FINAL_PP_V=FINAL_MAX_V-FINAL_MIN_V\n let PRE_VALID=0\n let FINAL_VALID=0\n if abs(PRE_VREF_V-1.194) <= 0.005*1.194\n  let PRE_VALID=1\n end\n if abs(FINAL_VREF_V-1.194) <= 0.005*1.194\n  let FINAL_VALID=1\n end\n let START_READY_300US=0\n let RESTART_READY_300US=0\n if PRE_VALID\n  if START_MAX_REL_ERROR <= 0.005\n   let START_READY_300US=1\n  end\n  if FINAL_VALID\n   if RESTART_MAX_REL_ERROR <= 0.005\n    let RESTART_READY_300US=1\n   end\n  end\n end\n print PRE_VREF_V FINAL_VREF_V FINAL_IDD_UA START_MAX_REL_ERROR RESTART_MAX_REL_ERROR START_PEAK_V RESTART_PEAK_V FINAL_PP_V PRE_VALID FINAL_VALID START_READY_300US RESTART_READY_300US >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\n * Metrics use adaptive timepoints; exported waveform uses a 1 us grid.\n linearize v(avdd) v(vref) i(vdd)\n let IDD_UA=-i(vdd)*1e6\n echo BEGIN_TRAN_DATA_TIME_S_VDD_V_VREF_V_IDD_UA >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\n wrdata /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt v(avdd) v(vref) IDD_UA\n echo END_TRAN_DATA >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\n echo END_OF_TB03_STARTUP_RESTART_RUN >> /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\n echo UPLOAD_THIS_FILE /foss/designs/chipalooza-bandgap/individual_tests/TB03_STARTUP_RESTART_UPLOAD_THIS.txt\nend\n.endc\n",
+    "TB04_TEMPERATURE": "",
+    "TB05_LOOP_STABILITY": "",
+    "TB06_MONTE_CARLO": "",
+    "TB07_NOISE": "",
+    "TB08_POWER_DEVICE_LIMITS": "",
+    "TB09_SUPPLY_DISTURBANCE": ""
+  }
+}
