@@ -1168,7 +1168,7 @@ C {lab_wire.sym} 140 1010 0 0 {name=p75 sig_type=std_logic lab=avss
 C {lab_wire.sym} 140 1100 0 0 {name=p76 sig_type=std_logic lab=avdd
 }
 C {vsource.sym} 170 940 0 0 {name=VSENSE value=0 savecurrent=false}
-C {symbols/pfet_03v3.sym} -480 720 0 1 {name=SUPPDET
+C {symbols/pfet_05v0.sym} -480 720 0 1 {name=SUPPDET
 L=1u
 W=80u
 nf=1
@@ -1180,7 +1180,7 @@ as="'int((nf+2)/2) * W/nf * 0.18u'"
 ps="'2*int((nf+2)/2) * (W/nf + 0.18u)'"
 nrd="'0.18u / W'" nrs="'0.18u / W'"
 sa=0 sb=0 sd=0
-model=pfet_03v3
+model=pfet_05v0
 spiceprefix=X
 }
 C {lab_wire.sym} -430 800 0 0 {name=p77 sig_type=std_logic lab=vsu
