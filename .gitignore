@@ -1,0 +1,7 @@
+/results/
+__pycache__/
+*.pyc
+.venv/
+# Keep previously generated standalone results untracked after migration.
+/trim_testbench/generated/
+/trim_testbench/runs/

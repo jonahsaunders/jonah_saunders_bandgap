@@ -1,8 +1,8 @@
 # Jonah Saunders Bandgap
 
-A GF180 bandgap reference project with Xschem schematics, nine independent ngspice testbenches, a Python simulation runner, and plotting tools. All benches share **one configuration file: `bandgap_config.json`**.
+A GF180 bandgap reference project with Xschem schematics, ten independent ngspice testbenches, a Python simulation runner, and plotting tools. All benches share **one configuration file: `bandgap_config.json`**.
 
-The original circuit schematics, symbols, simulation scripts, and configuration are preserved from the supplied project. The repository adds setup documentation, generated-file exclusions, and GitHub Actions software checks. The historical circuit-validation notes are in [VALIDATION.md](VALIDATION.md).
+This branch contains the cleaned startup-repaired core and the physical resistor-trim variant. TB10 uses the same runner, configuration, reports and plotter as TB01–TB09; no separate trim package is required. Historical and current validation notes are in [VALIDATION.md](VALIDATION.md).
 
 ## Repository contents
 
@@ -10,11 +10,11 @@ The original circuit schematics, symbols, simulation scripts, and configuration 
 |---|---|
 | `Bandgap_Core.sch`, `Bandgap_Core.sym` | Functional bandgap core |
 | `Bandgap_Core_LoopProbe.sch`, `Bandgap_Core_LoopProbe.sym` | Core with loop-probe connections |
-| `TB01_*.sch` through `TB09_*.sch` | Nine independent testbenches |
+| `Bandgap_Core_Res.sch`, `Bandgap_Core_Res.sym` | Physical seven-bit resistor-trim core and 12-pin symbol |
+| `TB01_*.sch` through `TB10_*.sch` | Ten independent testbenches |
 | `bandgap_config.json` | Sweep settings, profiles, and control templates |
 | `run_bandgap.py` | Unified simulation runner and path configuration |
 | `plot_bandgap.py` | Figures, combined PDF, and metrics CSVs |
-| `run_bandgap_tb08_fixed.py` | Legacy standalone TB08 patch; the unified runner already includes the fix |
 | `verify_suite.py` | Software checks that require no simulator or PDK |
 
 Keep these project files together: the schematic launchers and Python imports depend on this layout.
@@ -32,9 +32,9 @@ python3 verify_suite.py
 python3 run_bandgap.py --configure --netlist-dir "$HOME/.xschem/simulations"
 ```
 
-Use your actual Xschem netlist directory; omit `--netlist-dir` to use `~/.xschem/simulations`. Some FOSS containers use `/headless/.xschem/simulations`. Configuration rewrites the nine launchers and binds their symbols to this repository folder. Run it after cloning or moving the folder. It does not modify either core. Review the resulting local path changes before committing testbench schematics.
+Use your actual Xschem netlist directory; omit `--netlist-dir` to use `~/.xschem/simulations`. Some FOSS containers use `/headless/.xschem/simulations`. Configuration rewrites the ten launchers and binds their symbols to this repository folder. Run it after cloning or moving the folder. It does not modify any core schematic. Review the resulting local path changes before committing testbench schematics.
 
-**The supplied configuration selects `full`, including TB05.** For a quick initial run, pass `--profile smoke` as below. To use smoke runs from Xschem, set `default_profile` and TB05's `test_profiles` entry to `smoke` before simulating.
+**TB01–TB09 default to `full`, including TB05. TB10 defaults separately to `trim_nominal`.** For a quick initial run, pass `--profile smoke` as below. To use smoke runs from Xschem, set `default_profile` and TB05's `test_profiles` entry to `smoke` before simulating.
 
 Open a `TBxx_*.sch`, regenerate its netlist, and simulate that bench. Each schematic invokes only its own test. To smoke-test a generated netlist directly:
 
@@ -50,16 +50,16 @@ The simulator runner needs Python 3.9+ and ngspice on PATH. Plotting additionall
 `bandgap_config.json` replaces `pvt_config.json`, `pvt_config_loop_smoke.json`, and `pvt_controls.json`:
 
 - `output_directory`: one results root, relative to the JSON's directory unless absolute. Default: `results` beside the project files.
-- `defaults`: PVT axes, simulator settings, and TB06–TB09 measurement settings.
-- `profiles`: `full`, `smoke`, and `loop_smoke` overrides.
+- `defaults`: PVT axes, simulator settings, and shared measurement settings.
+- `profiles`: `full`, `smoke`, `loop_smoke`, and `trim_nominal` overrides.
 - `default_profile`: `full`.
-- `test_profiles`: the supplied TB05 entry is `full`. Set it to `loop_smoke` for a nominal loop check or `smoke` for the shared smoke profile.
-- `test_overrides`: optional settings by full test name.
-- `controls`: the existing TB01–TB03 ngspice control templates, now embedded in this file. TB04–TB09 controls are generated in Python and their template slots are empty strings.
+- `test_profiles`: TB05 selects `full`; TB10 selects `trim_nominal`. Set TB05 to `loop_smoke` for a nominal loop check or `smoke` for the shared smoke profile.
+- `test_overrides`: settings by full test name, including TB10's fixed DVDD, transient step, assistance/bias limits and optional startup.
+- `controls`: the existing TB01–TB03 ngspice control templates, now embedded in this file. TB04–TB10 controls are generated in Python and their template slots are empty strings.
 
 Settings apply in this order: defaults → per-test overrides → selected profile. A command-line `--profile` overrides the default/per-test profile selection. Full and smoke results live in separate subdirectories, so they cannot overwrite each other.
 
-For example, change the `test_profiles` entry to `"TB05_LOOP_STABILITY": "loop_smoke"` to make the GUI run a nominal TB05 check. `--configure` preserves the JSON selection. Its legacy console message still mentions `loop_smoke`; the JSON setting is authoritative. To make every GUI bench a quick smoke test, set `default_profile` to `smoke` and TB05's entry to `smoke` too.
+For example, change the `test_profiles` entry to `"TB05_LOOP_STABILITY": "loop_smoke"` to make the GUI run a nominal TB05 check. `--configure` preserves the JSON selection. To make TB01–TB09 GUI runs quick smoke tests, set `default_profile` to `smoke` and TB05's entry to `smoke` too; leave TB10's entry at `trim_nominal`.
 
 An earlier `validation.json`, referenced in the historical validation notes, described past verification; it is not runtime configuration and is not included here. That history is documented in `VALIDATION.md`. Only one JSON file is shipped. Generated per-case `result.json` caches remain simulation **outputs**, not additional configuration files.
 
@@ -67,7 +67,7 @@ The existing TB01–TB05 analysis targets and algorithms are retained: 1.194 V �
 
 ## Test coverage
 
-The full fixed-corner grid is **5 MOS × 3 BJT × 3 resistor × 3 MIM = 135 combinations**. Unless swept continuously, temperatures are −40, 25, and 125 °C and supplies are 3.0, 3.3, 3.6, 4.0, 4.5, 5.0, and 5.5 V. The 3.0/5.5 V points are labeled stress; the nominal range remains 3.3–5 V. All grid points run when `full` is selected, even when the operating point misses the accuracy target; TB05 retains its explicit pre-AC acceptance gate.
+For TB01–TB09, the full fixed-corner grid is **5 MOS × 3 BJT × 3 resistor × 3 MIM = 135 combinations**. Unless swept continuously, temperatures are −40, 25, and 125 °C and supplies are 3.0, 3.3, 3.6, 4.0, 4.5, 5.0, and 5.5 V. The 3.0/5.5 V points are labeled stress; the nominal range remains 3.3–5 V. All grid points run when `full` is selected, even when the operating point misses the accuracy target; TB05 retains its explicit pre-AC acceptance gate.
 
 | Bench | Measurement | Full-profile cases | Smoke cases |
 |---|---|---:|---:|
@@ -80,6 +80,9 @@ The full fixed-corner grid is **5 MOS × 3 BJT × 3 resistor × 3 MIM = 135 comb
 | TB07_NOISE | Output noise spectrum and band-integrated RMS noise | 2,835 | 1 |
 | TB08_POWER_DEVICE_LIMITS | Quiescent current/power; DC/startup MOS voltage screens | 2,835 | 1 |
 | TB09_SUPPLY_DISTURBANCE | Ramps, brownouts, repeated cycles, supply steps | 33,210 | 5 |
+| TB10_RESISTOR_TRIM | Physical trim sweep + held-code startup/restart | Use `trim_nominal` | Use `trim_nominal` |
+
+TB10's `trim_nominal` profile schedules one calibration bundle: 256 DC operating points plus two startup/restart transients. It rejects other PVT axes instead of silently treating them as nominal.
 
 Full coverage can take substantial time, especially TB03/TB09. Inspect the schedule without a simulator/netlist:
 
@@ -101,7 +104,7 @@ The full profile runs 100 deterministic seeds per mode at all 21 V/T points: 6,3
 
 Statistical global variation replaces the fixed ff/ss/fs/sf grid. Combining those shifts with deterministic extreme process corners would not represent ordinary population yield. Deterministic corner coverage is supplied by the other benches. The original MIM compatibility model remains nominal in this **DC-only** test; MIM random variation is not exercised. Device mismatch coverage is whatever the installed PDK statistical models implement.
 
-The output correction is `1.194 V − simulated VREF`, reported in mV. **There is no physical trim network or trim-code sweep in the supplied core.** This quantity helps estimate the correction range needed; it does not demonstrate realizable trim resolution, post-trim TC, or trim yield. MC startup/PSRR/noise and statistical layout effects are outside TB06's current scope. Histograms use one V/T point; they do not pool PVT points into a misleading yield histogram.
+The output correction is `1.194 V − simulated VREF`, reported in mV. **TB06 still uses the untrimmed `Bandgap_Core`; it does not exercise the separate physical trim network.** TB10 exercises `Bandgap_Core_Res` nominally, but does not add trim yield qualification to TB06. This quantity helps estimate the correction range needed; it does not demonstrate realizable trim resolution, post-trim TC, or trim yield. MC startup/PSRR/noise and statistical layout effects are outside TB06's current scope. Histograms use one V/T point; they do not pool PVT points into a misleading yield histogram.
 
 ## TB07: noise
 
@@ -134,6 +137,91 @@ The supply returns to each case's programmed voltage. A recovery is ready only i
 
 Metrics include final reference, settling time or null when unsettled, overshoot, minimum reference during recovery, and peak supply current. Supply-step cases additionally report the maximum reference deviation during/after the disturbance. The 2 µs maximum transient step is an explicit simulation setting; tighten it and check convergence when examining very narrow spikes or close timing margins. These finite scenarios are not an exhaustive supply-event proof.
 
+## TB10: physical resistor trim and selected-code startup
+
+TB10 uses the existing **Bandgap_Core_Res.sch**, via its custom 12-pin symbol.
+It includes the real resistor segments, MOS bypass switches and body ties—not
+ideal replacements. No core dimensions or connections are changed by the runner.
+
+After configuring the launchers, open **TB10_RESISTOR_TRIM.sch** in Xschem,
+regenerate its netlist and simulate. It launches the unified runner just like
+the other benches. Alternatively, run the freshly generated netlist directly:
+
+```bash
+python3 run_bandgap.py --test TB10_RESISTOR_TRIM \
+  --deck /headless/.xschem/simulations/TB10_RESISTOR_TRIM.spice
+python3 plot_bandgap.py --test TB10_RESISTOR_TRIM --profile trim_nominal
+```
+
+Use your actual netlist path. The default profile is `trim_nominal`;
+`--profile full` and `--profile smoke` are not TB10 corner qualifications.
+Preview the schedule without a simulator:
+
+```bash
+python3 run_bandgap.py --test TB10_RESISTOR_TRIM --list-cases
+```
+
+The bundle:
+
+1. Sweeps every code 0–127 at AVDD = 3.3 V and 5 V, TT / 25 C.
+2. Keeps DVDD and logic-high at 3.3 V; connects AVSS and DVSS to ground.
+3. Chooses the closest healthy code to 1.194 V at 3.3 V and **holds that same code
+   at 5 V**. Independently optimal codes are reported separately.
+4. Checks cold start and analog restart at both supplies using that held code.
+   DVDD starts first and remains powered during analog shutdown/restart.
+
+`b0` is the LSB; a 1 bypasses its physical segment, while a 0 includes it.
+Bit strings are shown as `b6 ... b0`. Code search is exhaustive because the
+measured 63→64 transition is slightly nonmonotonic.
+
+The common target/tolerance/recovery settings apply: 1.194 V +/-0.5% and 300 us
+after the analog ramp. In addition, M7/M20/SUPINJ currents must be <=1 nA and
+N1/M16/M18 bias magnitudes >10 nA, sustained through the event window with at
+least 100 us final observation. TB10 uses a maximum 100 ns transient step and
+the inherited tighter Gear settings. These remain explicit in the configuration
+and schematic; no PDK patch or resistor-junction workaround is introduced.
+
+Add `--dc-only` to omit transients; reports explicitly mark startup untested.
+The `trim_startup` per-test setting controls the same choice for GUI runs.
+
+Results use the existing hierarchy:
+
+```text
+results/trim_nominal/TB10_RESISTOR_TRIM_UPLOAD_THIS.txt
+results/trim_nominal/TB10_RESISTOR_TRIM/cases/TT_T25_trim_3p3V_5V/
+results/trim_nominal/plots/
+```
+
+The plotter produces case status, VREF/error/code-step curves, supply/VREF/startup
+current waveforms, and cold/restart readiness bars. They also appear in the
+normal combined `bandgap_plots.pdf`. CSVs include common metrics,
+`TB10_RESISTOR_TRIM_trim_codes.csv` (all 256 code points), and
+`TB10_RESISTOR_TRIM_startup_events.csv`.
+
+Before replotting TB10, its previous generated PNGs/CSVs move to
+`plots/previous/TB10_.../`. This preserves them without leaving stale startup
+pictures beside a newer DC-only report.
+
+Matching completed bundles resume using the same fingerprint/locking/report
+mechanism. Changed inputs or retries create a new `attempts/run_.../` inside
+the case folder, retaining its decks, logs, full terminal traces and DC CSV.
+TB10 intentionally retains these attempt artifacts even if `retain_waveforms`
+is false; its compact plotting traces also use the normal compressed cache.
+This release changes runner/config fingerprints; older results are not assumed
+compatible merely because they are present.
+
+Nominal validation selects code 70 (`1000110`), giving approximately
+1.194454 V at 3.3 V and 1.194605 V at 5 V; cold/restart checks pass at both.
+This is **not** full PVT, trim yield, post-trim TC, PSRR/noise, extracted-layout or
+foundry reliability qualification. AVDD-first startup, DVDD loss and retained
+analog charge during DVDD shutdown remain unqualified. The trim gate-voltage
+screen is diagnostic, not a foundry rating.
+
+The earlier `trim_testbench/` source package has been consolidated into the
+root scripts, schematic and this README. No new `run_trim.py` or preparation
+folder is needed. Old locally generated results are not deleted or automatically
+imported into the new cache.
+
 ## TB05 connections preserved
 
 The seven-pin core and both injections are retained exactly as uploaded:
@@ -156,7 +244,7 @@ The first command discovers all profile directories under `output_directory`. Ea
 
 - PNG figures for every available bench, including failed-case status pages;
 - one combined `bandgap_plots.pdf` per profile;
-- per-bench metrics CSVs and a separate TB08 per-device CSV.
+- per-bench metrics CSVs, a TB08 per-device CSV, and TB10 trim-code/startup-event CSVs.
 
 All completed-case metrics are included. To keep large sweeps readable and limit memory, detailed waveform panels display up to 24 evenly selected case traces per bench by default. This sampling is stated in the console and figure case counts. It is not a worst-case waveform selection. Use `--max-waveforms 0` to display every available trace, or raise the limit to a manageable number. Worst-case metrics still use all reported cases.
 
@@ -186,39 +274,26 @@ The embedded MIM model is your existing charge-form compatibility implementation
 
 See `VALIDATION.md` for the software and representative local simulator checks performed on this release. The full corner matrix still needs to run in your actual PDK environment.
 
-## Software checks and GitHub Actions
+## Software checks
 
-Run the same checks used in CI:
+Run the integrated software checks:
 
 ```bash
-python3 -m py_compile run_bandgap.py plot_bandgap.py run_bandgap_tb08_fixed.py verify_suite.py
+python3 -m py_compile run_bandgap.py plot_bandgap.py verify_suite.py
 python3 verify_suite.py
 ```
 
-GitHub Actions runs syntax compilation and the 12 software checks on Python 3.9 and 3.12 for pushes and pull requests. The checks use only Python's standard library; ngspice, Xschem, and the GF180 PDK are not installed in CI. Electrical simulation and plotting are separate steps in your configured environment.
+The 25 checks use only the Python standard library; they do not require ngspice,
+Xschem or the PDK and are not electrical signoff. They cover the existing suite,
+all ten launchers, trim polarity/code coverage, fixed-code calibration, failure
+detection and startup readiness. Electrical and plotting checks are documented
+in [VALIDATION.md](VALIDATION.md).
 
-During repository preparation, the existing smoke-profile check was corrected to select `loop_smoke` explicitly, so it no longer conflicts with the supplied full-profile default. The historical `VALIDATION.md` records prior work; no new electrical simulation was performed while packaging this repository.
-
-Generated simulation results, netlists, virtual environments, and Python caches are excluded by `.gitignore`. PDK files must be installed separately. No project license was supplied with the ZIP; a license has not been selected as part of repository preparation.
-
-## Publish the prepared repository
-
-The prepared ZIP includes a local Git repository with an initial commit on `main`. Create an empty GitHub repository named `jonah-saunders-bandgap` under your account. Leave the README, `.gitignore`, and license initialization options unchecked because this package already has a commit.
-
-From the extracted repository folder, publish using Git:
-
-```bash
-git remote add origin https://github.com/jonahsaunders/jonah-saunders-bandgap.git
-git push -u origin main
-```
-
-Or, with GitHub CLI installed and authenticated, create and push a private repository in one command:
-
-```bash
-gh repo create jonahsaunders/jonah-saunders-bandgap --private --source=. --remote=origin --push
-```
-
-Use the workflow that matches your environment; change the account, name, or visibility if needed.
+Generated simulation results and Python caches are excluded by `.gitignore`.
+The inherited GF180-derived MIM block is embedded in TB10's MODELS section,
+matching the existing benches; its attribution is retained and its Apache-2.0
+license is included as [LICENSE-GF180.txt](LICENSE-GF180.txt). That file does not
+select a license for the rest of the project. PDK files are installed separately.
 
 ## References
 
