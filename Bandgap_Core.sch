@@ -15,6 +15,7 @@ T {Folded Cascode Bias Network} 710 1200 0 0 0.4 0.4 {}
 T {Beta Multiplier IREF} 10 1200 0 0 0.4 0.4 {}
 T {Bandgap Cascode Reference
 } -800 1200 0 0 0.4 0.4 {}
+T {Startup Circuit} -310 1200 0 0 0.4 0.4 {}
 N 580 -550 600 -550 {lab=vgp}
 N 640 -550 720 -550 {lab=avdd}
 N 720 -610 720 -550 {lab=avdd}
