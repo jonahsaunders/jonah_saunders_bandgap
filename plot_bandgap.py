@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 CONFIG_NAME = 'bandgap_config.json'
 TESTS = ('TB01_PSRR', 'TB02_LINE_REGULATION', 'TB03_STARTUP_RESTART',
          'TB04_TEMPERATURE', 'TB05_LOOP_STABILITY', 'TB06_MONTE_CARLO',
-         'TB07_NOISE', 'TB08_POWER_DEVICE_LIMITS', 'TB09_SUPPLY_DISTURBANCE')
+         'TB07_NOISE', 'TB08_POWER_DEVICE_LIMITS', 'TB09_SUPPLY_DISTURBANCE', 'TB10_RESISTOR_TRIM')
 VREF_TARGET = 1.194
 
 try:
@@ -1145,6 +1145,116 @@ def write_device_csv(path,cases):
         w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(rows)
 
 
+
+def figures_tb10(test,head,cases,summary,waves):
+    """Physical trim curves plus the held-code digital-first transients."""
+    figs=[]
+    config=head.get('coverage',{})
+    target=config.get('reference_target_V',VREF_TARGET)
+    tol=config.get('reference_tolerance_fraction',.005)
+    off=config.get('trim_startup_off_limit_A',1e-9)
+    for case,text in waves.values():
+        data=blocks(text)
+        table=np.asarray(data.get('TRIM_SWEEP',[]),dtype=float)
+        if table.shape!=(256,14) or not np.isfinite(table).all():
+            raise ValueError('TB10 sweep is incomplete; refusing a partial trim curve')
+        chosen=case['metrics']['calibration_code']
+        fig,ax=plt.subplots(3,1,figsize=(10,8),sharex=True)
+        for i,supply in enumerate((3.3,5.0)):
+            rr=table[table[:,1]==supply];rr=rr[np.argsort(rr[:,0])]
+            label=f'AVDD {supply:g} V'
+            ax[0].plot(rr[:,0],rr[:,3],label=label,color=CAT[i])
+            ax[1].plot(rr[:,0],(rr[:,3]-target)*1e3,label=label,color=CAT[i])
+            ax[2].plot(rr[1:,0],-np.diff(rr[:,3])*1e3,label=label,color=CAT[i])
+        ax[0].axhspan(target*(1-tol),target*(1+tol),color=GOOD,alpha=.1)
+        ax[0].axhline(target,color=INK2,ls='--',lw=.8)
+        ax[1].axhline(0,color=INK2,ls='--',lw=.8)
+        ax[2].axhline(0,color=INK2,ls='--',lw=.8)
+        ax[0].set_ylabel('VREF (V)');ax[1].set_ylabel('Target error (mV)')
+        ax[2].set_ylabel('Previous minus next (mV)')
+        ax[2].set_xlabel('Trim code (b6 ... b0); 1 bypasses the physical resistor')
+        ax[0].set_title(f'{test} — trim sweep, TT / 25 C / DVDD 3.3 V',loc='left')
+        for a in ax:
+            a.axvline(chosen,color=MUTED,ls=':',lw=1)
+            a.legend(fontsize=8)
+        note(ax[2],f'Code {chosen} ({chosen:07b}) selected only at 3.3 V and held at 5 V. Negative steps are nonmonotonic.')
+        fig.tight_layout();figs.append(fig)
+        starts=[(supply,np.asarray(data.get('TRIM_STARTUP_'+str(supply).replace('.','P'),[]),dtype=float))
+                for supply in (3.3,5.0)]
+        starts=[(v,a) for v,a in starts if len(a)]
+        if starts:
+            fig,ax=plt.subplots(3,1,figsize=(10,8),sharex=True)
+            for i,(supply,a) in enumerate(starts):
+                if a.ndim!=2 or a.shape[1]!=5 or a[-1,0]<.006-1e-10:
+                    raise ValueError('Incomplete TB10 startup trace')
+                tt=a[:,0]*1e3
+                ax[0].plot(tt,a[:,1],label=f'AVDD {supply:g} V',color=CAT[i])
+                ax[1].plot(tt,a[:,3],label=f'AVDD {supply:g} V',color=CAT[i])
+                ax[2].semilogy(tt,np.maximum(a[:,4],1e-18),label=f'AVDD {supply:g} V',color=CAT[i])
+            ax[0].plot(starts[0][1][:,0]*1e3,starts[0][1][:,2],ls='--',color=INK2,label='DVDD 3.3 V')
+            ax[1].axhspan(target*(1-tol),target*(1+tol),color=GOOD,alpha=.15)
+            ax[1].axhline(target,color=INK2,ls='--',lw=.7)
+            ax[2].axhline(off,color=CRITICAL,ls='--',lw=.7,label='Assist-off threshold')
+            ax[0].set_ylabel('Supply (V)');ax[1].set_ylabel('VREF (V)')
+            ax[2].set_ylabel('Max startup-aid |I| (A)');ax[2].set_xlabel('Time (ms)')
+            ax[0].set_title(f'{test} — startup/restart, fixed code {chosen}',loc='left')
+            for a in ax:a.legend(fontsize=8)
+            note(ax[2],'DVDD rises first and stays on. These nominal events do not qualify DVDD loss or AVDD-first power-up.')
+            fig.tight_layout();figs.append(fig)
+        events=[(m['avdd_V'],e) for m in case['metrics'].get('startup',[])
+                if m['status']=='COMPLETE' for e in m['events']]
+        if events:
+            fig,ax=plt.subplots(figsize=(9,4))
+            names=[f'{v:g} V {e["event"]}' for v,e in events]
+            values=[e['settle_after_ramp_us'] or 0 for _,e in events]
+            colors=[GOOD if e['status']=='PASS' else CRITICAL for _,e in events]
+            bars=ax.bar(names,values,color=colors,width=.65)
+            limit=config.get('recovery_limit_s',.0003)*1e6
+            ax.axhline(limit,color=CRITICAL,ls='--',label=f'{limit:g} us deadline')
+            for bar,(_,event) in zip(bars,events):
+                label=event['status'] if event['settle_after_ramp_us'] is not None else 'FAIL: unsettled'
+                ax.annotate(label,(bar.get_x()+bar.get_width()/2,bar.get_height()),xytext=(0,5),
+                            textcoords='offset points',ha='center',fontsize=8)
+            ax.set_ylim(0,max([limit]+values)*1.25)
+            ax.set_ylabel('Settling after AVDD ramp (us)');ax.legend()
+            ax.set_title(f'{test} — selected-code readiness',loc='left')
+            note(ax,'Readiness requires the reference band, assistance off, and live bias branches to remain valid.')
+            fig.tight_layout();figs.append(fig)
+    return figs
+
+
+def write_trim_csv(out,test,cases,waves):
+    fields=['code','avdd_V','dvdd_V','vref_V','vq3_V','analog_idd_A','digital_idd_A',
+            'error_mV','xm7_A','xm20_A','xsupinj_A','xn1_A','xm16_A','xm18_A']
+    with (out/(test+'_trim_codes.csv')).open('w',newline='') as f:
+        writer=csv.writer(f);writer.writerow(['case_id']+fields)
+        for case,text in waves.values():
+            for row in blocks(text).get('TRIM_SWEEP',[]):writer.writerow([case['case_id']]+row)
+    events=[]
+    for case in complete(cases):
+        for run in case['metrics'].get('startup',[]):
+            for event in run.get('events',[]):
+                events.append(dict(case_id=case['case_id'],avdd_V=run['avdd_V'],
+                                   code=run['code'],**event))
+    if events:
+        fields=list(events[0])
+        with (out/(test+'_startup_events.csv')).open('w',newline='') as f:
+            writer=csv.DictWriter(f,fieldnames=fields);writer.writeheader();writer.writerows(events)
+
+
+def archive_trim_plots(out):
+    # A DC-only rerun must not leave old startup pictures looking current.
+    # Preserve prior generated figures/CSVs rather than deleting them.
+    import shutil
+    import time
+    previous=sorted(p for p in out.glob('TB10_RESISTOR_TRIM_*')
+                    if p.is_file() and p.suffix in ('.png','.csv'))
+    if previous:
+        archive=out/'previous'/('TB10_'+str(time.time_ns()))
+        archive.mkdir(parents=True,exist_ok=False)
+        for path in previous:shutil.move(str(path),str(archive/path.name))
+
+
 BUILDERS = {
     'TB01_PSRR': figures_tb01,
     'TB02_LINE_REGULATION': figures_tb02,
@@ -1155,6 +1265,7 @@ BUILDERS = {
     'TB07_NOISE': figures_tb07,
     'TB08_POWER_DEVICE_LIMITS': figures_tb08,
     'TB09_SUPPLY_DISTURBANCE': figures_tb09,
+    'TB10_RESISTOR_TRIM': figures_tb10,
 }
 
 
@@ -1237,9 +1348,11 @@ def main():
         print('%-22s %d cases (%s), %d with retained waveforms, profile %s'
               % (test, len(cases), source, len(waves), head.get('profile', '?')))
         progress(test, head, cases)
+        if test=='TB10_RESISTOR_TRIM': archive_trim_plots(out)
         if not args.no_csv:
             written = write_csv(out/(test+'_metrics.csv'), cases)
             if test=='TB08_POWER_DEVICE_LIMITS': write_device_csv(out/(test+'_devices.csv'),cases)
+            if test=='TB10_RESISTOR_TRIM': write_trim_csv(out,test,cases,waves)
             if written:
                 print('%-22s   %s' % ('', written.name))
         figs = [status_figure(test, cases, summary, head)]

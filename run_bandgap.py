@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified GF180 test runner: TB01-TB09, reporting, resume, and --configure.
+"""Unified GF180 test runner: TB01-TB10, reporting, resume, and --configure.
 Python standard library only. One bandgap_config.json supplies settings, profiles and control templates.
 TB05 requires the intended loop-probe core. TB08 includes the GND-vector fix.
 Replace the previous run_bandgap.py with this file, then run --configure using
@@ -26,7 +26,7 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
-TESTS = ('TB01_PSRR', 'TB02_LINE_REGULATION', 'TB03_STARTUP_RESTART', 'TB04_TEMPERATURE', 'TB05_LOOP_STABILITY', 'TB06_MONTE_CARLO', 'TB07_NOISE', 'TB08_POWER_DEVICE_LIMITS', 'TB09_SUPPLY_DISTURBANCE')
+TESTS = ('TB01_PSRR', 'TB02_LINE_REGULATION', 'TB03_STARTUP_RESTART', 'TB04_TEMPERATURE', 'TB05_LOOP_STABILITY', 'TB06_MONTE_CARLO', 'TB07_NOISE', 'TB08_POWER_DEVICE_LIMITS', 'TB09_SUPPLY_DISTURBANCE', 'TB10_RESISTOR_TRIM')
 MIM_FACTORS = {'mimcap_typical': 1.0, 'mimcap_ff': 0.9, 'mimcap_ss': 1.1}
 ALLOWED = {'mos_corners': {'typical','ff','ss','fs','sf'},
            'bjt_corners': {'bjt_typical','bjt_ff','bjt_ss'},
@@ -232,6 +232,9 @@ def _base_read_result(text, test, c):
 
 
 def run_case(case, *, root, source, template, test, config, fingerprint, ngspice, retry_failed, compatible_fingerprints=()):
+    if test == TRIM:
+        return run_trim_case(case,root=root,source=source,config=config,fingerprint=fingerprint,
+                             ngspice=ngspice,retry_failed=retry_failed)
     d = root/'cases'/case['case_id']
     d.mkdir(parents=True,exist_ok=True)
     cache = d/'result.json'
@@ -320,17 +323,19 @@ def _base_summarize(results,test):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--configure',action='store_true',help='Set this folder and netlist paths in all nine schematics; no simulation')
+    ap.add_argument('--configure',action='store_true',help='Set this folder and netlist paths in all ten schematics; no simulation')
     ap.add_argument('--netlist-dir',type=Path,default=Path.home()/'.xschem'/'simulations',help='Netlist directory for --configure')
     ap.add_argument('--deck',type=Path)
     ap.add_argument('--test',choices=TESTS)
     ap.add_argument('--config',type=Path,default=HERE/'bandgap_config.json')
-    ap.add_argument('--profile',help='Override the configured per-test profile: full, smoke, loop_smoke')
+    ap.add_argument('--profile',help='Override the configured per-test profile: full, smoke, loop_smoke, trim_nominal')
     ap.add_argument('--list-cases',action='store_true',help='Print coverage without netlisting or simulation')
     ap.add_argument('--ngspice',default='ngspice')
     ap.add_argument('--retry-failed',action='store_true')
     ap.add_argument('--max-cases',type=int,help='Debug only: report explicitly remains INCOMPLETE')
+    ap.add_argument('--dc-only',action='store_true',help='TB10 only: omit selected-code startup/restart')
     args = ap.parse_args()
+    if args.dc_only and args.test != TRIM: ap.error('--dc-only is only supported for TB10')
     if args.configure:
         if args.deck or args.test:
             ap.error("--configure cannot be combined with --deck or --test")
@@ -339,6 +344,7 @@ def main():
     if args.test is None or (args.deck is None and not args.list_cases):
         ap.error("simulation requires --deck and --test; use --configure for path setup")
     c,templates = load_config(args.config,args.test,args.profile)
+    if args.dc_only: c['trim_startup'] = False
     validate_config(c)
     if args.max_cases is not None and args.max_cases < 1: ap.error('--max-cases must be positive')
     if args.list_cases:
@@ -346,6 +352,7 @@ def main():
         print(json.dumps({'test':args.test,'profile':c['_profile'],'planned_cases':len(planned),'first_case':planned[0],'last_case':planned[-1]},indent=2))
         return 0
     source,model_paths = prepare_source(args.deck.resolve())
+    if args.test == TRIM: validate_trim_source(source)
     model_paths = model_dependencies(model_paths)
     ng = shutil.which(args.ngspice)
     if ng is None:
@@ -714,24 +721,30 @@ def configure(folder,netlist_dir):
         if test=='TB05_LOOP_STABILITY':
             pass # TB05 default profile is selected in the single configuration file.
         value='.control\nset noaskquit\necho BANDGAP_SINGLE_RUNNER_V9_'+test+'\n'+cmd+'\necho RUNNER_RETURNED_CHECK_REPORT_AND_ERRORS\n.endc\n'
+        if test == TRIM: value=value.replace('.endc\n','quit\n.endc\n')
         encoded=value.replace('\\','\\\\').replace('"','\\"')
         replacement='C {code.sym} 530 420 0 0 {name=TEST only_toplevel=true format="@value" value="'+encoded+'"}'
         s,n=re.subn(r'C \{code.sym\} 530 420 0 0 \{name=TEST.*?\n"\}',lambda m:replacement,s,flags=re.S)
         if n!=1:raise ValueError('Expected one TEST block: '+str(p))
         # Bind to this folder's exact core, not an old library alias.
-        core=str(folder/('Bandgap_Core_LoopProbe.sym' if test=='TB05_LOOP_STABILITY' else 'Bandgap_Core.sym'));quoted(core)
-        s,n=re.subn(r'C \{[^\n{}]*Bandgap_Core(?:_LoopProbe)?(?:\(1\))?\.sym\} 400 240 0 0 \{name=x1\}',lambda m:'C {'+core+'} 400 240 0 0 {name=x1}',s)
+        core_name = 'Bandgap_Core_Res.sym' if test == TRIM else (
+            'Bandgap_Core_LoopProbe.sym' if test == LG else 'Bandgap_Core.sym')
+        core=str(folder/core_name);quoted(core)
+        position = '500 400' if test == TRIM else '400 240'
+        pattern = r'C \{[^\n{}]*Bandgap_Core(?:_LoopProbe|_Res)?(?:\(1\))?\.sym\} '+position+r' 0 0 \{name=x1\}'
+        s,n=re.subn(pattern,lambda m:'C {'+core+'} '+position+' 0 0 {name=x1}',s)
         if n!=1:raise ValueError('Expected one core instance: '+str(p))
         updates.append((p,s))
     for p,s in updates:p.write_text(s)
-    print('Configured nine testbenches in '+str(folder))
+    print('Configured ten testbenches in '+str(folder))
     print('Expected Xschem netlist directory: '+str(netlist_dir))
     print('Open canonical TBxx filenames, regenerate the netlist, then simulate.')
-    print('TB05 defaults to loop_smoke; override test_profiles in bandgap_config.json for full.')
+    print('Per-test profiles come from bandgap_config.json; TB10 defaults to trim_nominal.')
 
 
 # TB06-TB09 and consolidated configuration. Existing TB01-TB05 math stays above.
-MC, NOISE, POWER, DISTURB = TESTS[5:]
+MC, NOISE, POWER, DISTURB = TESTS[5:9]
+TRIM = TESTS[9]
 _previous_cases, _previous_source = cases, source_for_case
 _previous_control, _previous_read, _previous_summary = control_for_case, read_result, summarize
 _previous_validate = validate_config
@@ -771,12 +784,14 @@ def load_config(path, test, profile=None):
     if not root.is_absolute(): root=path.parent/root
     c.update(results_directory=str(root.resolve()/profile),_profile=profile)
     if any(not isinstance(v,str) for v in doc['controls'].values()): raise ValueError('Control templates must be strings')
-    if set(doc['controls']) != set(TESTS): raise ValueError('controls must contain all nine test names')
+    if set(doc['controls']) != set(TESTS): raise ValueError('controls must contain all ten test names')
+    if test == TRIM: c['_test'] = TRIM
     return c,doc['controls']
 
 
 def validate_config(c):
     _previous_validate(c)
+    if c.get('_test') == TRIM: validate_trim_config(c)
     for key in ['mc_samples','mc_seed_start','repeated_cycle_count','noise_points_per_decade']:
         if type(c[key]) is not int or c[key]<1: raise ValueError(key+' must be a positive integer')
     if c['mc_seed_start']+c['mc_samples']>=2147483647: raise ValueError('MC seed exceeds signed 32-bit range')
@@ -798,7 +813,13 @@ def validate_config(c):
 
 
 def cases(c,test):
-    if test==MC:
+    if test == TRIM:
+        validate_trim_config(c)
+        yield dict(mos='typical',bjt='bjt_typical',res='res_typical',mim='mimcap_typical',
+                   temperature_C=25,vdd_V=None,range='nominal',case_id='TT_T25_trim_3p3V_5V',
+                   dc_operating_points=256,startup_runs=2 if c['trim_startup'] else 0,
+                   supply_voltages_V=[3.3,5.0],calibration_supply_V=3.3)
+    elif test==MC:
         # Statistical libraries replace deterministic process corners. Mixing global
         # random process shifts with ff/ss is not a population-yield calculation.
         for mode, sample in itertools.product(c['mc_modes'],range(c['mc_samples'])):
@@ -1055,6 +1076,7 @@ def read_result(text,test,c):
 
 
 def summarize(results,test):
+    if test == TRIM: return summarize_trim(results)
     if test not in (MC,NOISE,POWER,DISTURB): return _previous_summary(results,test)
     ok=[r for r in results if r['status']=='complete']
     s=dict(attempted=len(results),simulation_complete=len(ok),execution_failed_or_timed_out=len(results)-len(ok))
@@ -1078,6 +1100,284 @@ def summarize(results,test):
     return s
 
 
+
+
+# TB10: nominal physical resistor trim. Uses the common reports/cache/plot pipeline.
+TRIM_PORTS = 'avdd avss vref b0 b1 b2 b3 b4 b5 b6 dvss dvdd'
+TRIM_IDS = ('xm7', 'xm20', 'xsupinj', 'xn1', 'xm16', 'xm18')
+TRIM_FIELDS = ['code','avdd_V','dvdd_V','vref_V','vq3_V','analog_idd_A',
+               'digital_idd_A','error_mV'] + [dev+'_A' for dev in TRIM_IDS]
+TRIM_ERRORS = re.compile(r'error:|error on line|timestep too small|simulation(?:s)? aborted|'
+                         r'no such vector|unknown parameter|fatal error', re.I)
+
+
+def validate_trim_config(c):
+    expected = dict(mos_corners=['typical'],bjt_corners=['bjt_typical'],
+                    res_corners=['res_typical'],mim_corners=['mimcap_typical'],
+                    temperatures_C=[25],supply_voltages_V=[3.3,5.0])
+    if any(c.get(k) != v for k,v in expected.items()):
+        raise ValueError('TB10 currently supports TT/25 C at AVDD 3.3 and 5 V only; use --profile trim_nominal')
+    if c.get('trim_dvdd_V') != 3.3 or type(c.get('trim_startup')) is not bool:
+        raise ValueError('TB10 requires DVDD=3.3 V and boolean trim_startup')
+    for key in ['trim_transient_max_step_s','trim_tail_window_s','trim_startup_off_limit_A',
+                'trim_bias_min_A','trim_gate_screen_V']:
+        if not isinstance(c.get(key),(int,float)) or not math.isfinite(c[key]) or c[key]<=0:
+            raise ValueError('Invalid '+key)
+    if c['trim_transient_max_step_s'] > 1e-7 or c['trim_tail_window_s'] < 1e-4:
+        raise ValueError('TB10 needs max step <=100 ns and tail observation >=100 us')
+    if c['trim_tail_window_s'] > .001 or c['recovery_limit_s'] > .001:
+        raise ValueError('TB10 timing criteria exceed the fixed restart observation window')
+
+
+def trim_bits(code):
+    if type(code) is not int or not 0 <= code < 128:
+        raise ValueError('7-bit code must be an integer in 0..127')
+    return [(code >> i) & 1 for i in range(7)]
+
+
+def validate_trim_source(source):
+    # The dedicated probes assume these physical core pins/nodes, never the old 3-pin core.
+    statements = [[w.lower() for w in row] for row in spice_statements(source)]
+    header = ['.subckt','bandgap_core_res']+TRIM_PORTS.split()
+    if statements.count(header) != 1:
+        raise ValueError('TB10 requires the embedded 12-pin Bandgap_Core_Res in its original pin order')
+    instance = 'x1 avdd 0 vref b0 b1 b2 b3 b4 b5 b6 0 dvdd bandgap_core_res'.split()
+    if statements.count(instance) != 1:
+        raise ValueError('TB10 DUT instance/ground/bit connections do not match the 12-pin symbol')
+    for name,nodes in [('vdd',['avdd','0']),('vdvdd',['dvdd','0'])]+[
+            ('vbit'+str(i),['b'+str(i),'0']) for i in range(7)]:
+        found=[row for row in statements if row[0]==name]
+        if len(found)!=1 or found[0][1:3]!=nodes:
+            raise ValueError('Missing or misconnected TB10 stimulus: '+name)
+
+
+def trim_sweep_control(c):
+    output = 'trim_sweep.txt'
+    TARGET = c['reference_target_V']
+    lines = ['.control', 'set noaskquit', 'set num_threads=1', 'set numdgt=15',
+             'set wr_singlescale', 'unset wr_vecnames', 'set appendwrite',
+             'save all ' + ' '.join(f'@m.x1.{x}.m0[id]' for x in TRIM_IDS),
+             'echo ' + ' '.join(TRIM_FIELDS) + f' > {output}',
+             'foreach supply 3.3 5', 'alter VDD dc = $supply',
+             'foreach code ' + ' '.join(map(str, range(128)))]
+    for i in range(7):
+        lines += [f'let bit_value = 3.3*(floor($code/{2**i})-2*floor($code/{2**(i+1)}))',
+                  f'alter VBIT{i} dc = $&bit_value']
+    lines += ['op', 'let vr = v(vref)', 'let vq = v(x1.vq3)',
+              'let ia = -i(vdd)', 'let idig = -i(vdvdd)',
+              f'let err = 1000*(v(vref)-{TARGET})']
+    for i, dev in enumerate(TRIM_IDS):
+        lines.append(f'let cur{i} = @m.x1.{dev}.m0[id]')
+    lines += ['let code_value = $code', 'let supply_value = $supply', 'let digital_value = 3.3',
+              'setscale code_value', f'wrdata {output} supply_value digital_value vr vq ia idig err ' +
+              ' '.join(f'cur{i}' for i in range(6)),
+              'destroy $curplot', 'end', 'end', 'echo TRIM_SWEEP_COMPLETE', '.endc']
+    return '\n'.join(lines) + '\n'
+
+
+def trim_startup_deck(source,vdd,code,c):
+    text = re.sub(r'^VDD\s+[^\n]*',
+                  f'VDD avdd 0 PWL(0 0 20u 0 120u {vdd} 4m {vdd} 4001u 0 4500u 0 4501u {vdd} 6m {vdd})',
+                  source,flags=re.M|re.I)
+    text = re.sub(r'^VDVDD\s+[^\n]*','VDVDD dvdd 0 PWL(0 0 1u 0 11u 3.3 6m 3.3)',text,flags=re.M|re.I)
+    for i,bit in enumerate(trim_bits(code)):
+        text = re.sub(r'^VBIT'+str(i)+r'\s+[^\n]*',f'EBIT{i} b{i} 0 dvdd 0 {bit}',text,flags=re.M|re.I)
+    vectors = {'avdd':'v(avdd)','dvdd':'v(dvdd)','vref':'v(vref)','vq3':'v(x1.vq3)',
+               'analog_idd':'-i(vdd)','digital_idd':'-i(vdvdd)'}
+    vectors.update({d:f'@m.x1.{d}.m0[id]' for d in TRIM_IDS})
+    vectors.update({f'b{i}':f'v(b{i})' for i in range(7)})
+    vectors.update({f'b{i}_b':f'v(x1.b{i}_b)' for i in range(7)})
+    vectors.update({f'rbit{i}top':f'v(x1.rbit{i}top)' for i in range(7)})
+    text += '.control\nset noaskquit\nset num_threads=1\nset numdgt=15\nset wr_singlescale\nset wr_vecnames\n'
+    text += 'save all '+' '.join(f'@m.x1.{d}.m0[id]' for d in TRIM_IDS)+f'\ntran {c["trim_transient_max_step_s"]:.15g} 6m 0 {c["trim_transient_max_step_s"]:.15g}\n'
+    for key,expr in vectors.items():
+        text += f'let out_{key} = {expr}\n'
+    text += 'wrdata trace.txt '+' '.join('out_'+k for k in vectors)+'\necho STARTUP_COMPLETE\n.endc\n.end\n'
+    return text,list(vectors)
+
+
+def trim_table(path,ncols):
+    with Path(path).open() as f:
+        next(f)  # wrdata field names
+        rows = [[float(v) for v in line.split()] for line in f if line.strip()]
+    if not rows or any(len(row)!=ncols or not all(math.isfinite(v) for v in row) for row in rows):
+        raise ValueError('Incomplete/nonfinite TB10 table: '+str(path))
+    return rows
+
+
+def trim_read_sweep(path,c):
+    data=trim_table(path,len(TRIM_FIELDS))
+    expected={(code,v) for code in range(128) for v in (3.3,5.0)}
+    if len(data)!=256 or {(r[0],r[1]) for r in data}!=expected or any(r[2]!=3.3 for r in data):
+        raise ValueError('Missing, duplicated or invalid TB10 code/supply point')
+    rows=[]
+    for values in data:
+        row=dict(zip(TRIM_FIELDS,values))
+        row['code']=int(row['code'])
+        row['bits_b6_to_b0']=format(row['code'],'07b')
+        row['self_sustaining_op']=all(abs(row[d+'_A'])<=c['trim_startup_off_limit_A'] for d in TRIM_IDS[:3]) and all(
+            abs(row[d+'_A'])>c['trim_bias_min_A'] for d in TRIM_IDS[3:])
+        rows.append(row)
+    return sorted(rows,key=lambda r:(r['avdd_V'],r['code']))
+
+
+def trim_dc_metrics(rows,c):
+    summary={}
+    for v in (3.3,5.0):
+        rr=[r for r in rows if r['avdd_V']==v]
+        valid=[r for r in rr if r['self_sustaining_op']]
+        if not valid:
+            raise ValueError(f'No self-sustaining TB10 operating point at {v} V')
+        best=min(valid,key=lambda r:abs(r['error_mV']))
+        volts=[r['vref_V'] for r in rr]
+        ordered=sorted(volts)
+        summary[str(v)]=dict(best_code=best['code'],bits_b6_to_b0=best['bits_b6_to_b0'],
+                            best_vref_V=best['vref_V'],best_error_mV=best['error_mV'],
+                            min_vref_V=min(volts),max_vref_V=max(volts),
+                            largest_sorted_gap_mV=max(b-a for a,b in zip(ordered,ordered[1:]))*1e3,
+                            upward_code_steps=sum(b-a>1e-8 for a,b in zip(volts,volts[1:])),
+                            self_sustaining_codes=len(valid))
+    code=summary['3.3']['best_code']
+    held=[r for r in rows if r['code']==code]
+    return dict(dc=summary,calibration_code=code,fixed_code_results=held,startup=[],
+                fixed_code_accuracy_pass=all(abs(r['vref_V']-c['reference_target_V'])<=
+                    c['reference_target_V']*c['reference_tolerance_fraction'] for r in held))
+
+
+def trim_startup_metrics(path,columns,c):
+    a=trim_table(path,len(columns)+1)
+    if a[-1][0]<.006-1e-10 or a[0][0]>1e-9 or any(b[0]<=x[0] for x,b in zip(a,a[1:])):
+        raise ValueError('TB10 startup trace incomplete or unordered')
+    t=[r[0] for r in a]
+    d={key:[r[i+1] for r in a] for i,key in enumerate(columns)}
+    d['zero']=[0.0]*len(t)
+    good=[abs(v-c['reference_target_V'])<=c['reference_target_V']*c['reference_tolerance_fraction']
+          for v in d['vref']]
+    for dev in TRIM_IDS[:3]:
+        good=[g and abs(v)<=c['trim_startup_off_limit_A'] for g,v in zip(good,d[dev])]
+    for dev in TRIM_IDS[3:]:
+        good=[g and abs(v)>c['trim_bias_min_A'] for g,v in zip(good,d[dev])]
+    events=[]
+    for name,start,end in [('cold',120e-6,.004),('restart',.004501,.006)]:
+        indexes=[i for i,x in enumerate(t) if start<=x<=end]
+        if not indexes: raise ValueError('TB10 startup event has no samples')
+        bad=[i for i in indexes if not good[i]]
+        first=bad[-1]+1 if bad else indexes[0]
+        settled=first<=indexes[-1] and t[indexes[-1]]-t[first]>=c['trim_tail_window_s']
+        delay=t[first]-start if settled else None
+        tail=[i for i,x in enumerate(t) if end-c['trim_tail_window_s']<=x<=end]
+        events.append(dict(event=name,settle_after_ramp_us=None if delay is None else delay*1e6,
+                           status='PASS' if delay is not None and delay<=c['recovery_limit_s'] else 'FAIL',
+                           tail_vref_V=sum(d['vref'][i] for i in tail)/len(tail),
+                           tail_startup_max_A={dev:max(abs(d[dev][i]) for i in tail) for dev in TRIM_IDS[:3]}))
+    stress=[]
+    for bit in range(7):
+        high,low=f'rbit{bit}top',f'rbit{bit+1}top' if bit<6 else 'vq3'
+        for name,gate,body in [(f'M{24+2*bit}',f'b{bit}_b','dvdd'),(f'M{25+2*bit}',f'b{bit}','zero')]:
+            max_gate=max(abs(g-v) for node in (high,low,body) for g,v in zip(d[gate],d[node]))
+            forward=max((v-b if body=='dvdd' else b-v) for node in (high,low) for v,b in zip(d[node],d[body]))
+            stress.append(dict(device=name,max_abs_gate_to_node_V=max_gate,
+                               max_body_junction_forward_bias_V=forward,
+                               gate_screen_limit_V=c['trim_gate_screen_V'],
+                               above_gate_screen=max_gate>c['trim_gate_screen_V']))
+    # Compact plottable columns; the full terminal traces also remain in the attempt.
+    wave='\n'.join(' '.join(f'{v:.15e}' for v in [
+        x,d['avdd'][i],d['dvdd'][i],d['vref'][i],max(abs(d[dev][i]) for dev in TRIM_IDS[:3])])
+        for i,x in enumerate(t))
+    return dict(events=events,trim_switch_stress=stress,rows=len(t)),wave
+
+
+def trim_simulate(deck,c,ngspice,marker):
+    env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
+    log=deck.with_suffix('.log')
+    with log.open('w') as f:
+        p=subprocess.run([ngspice,'-n','-b',str(deck)],cwd=deck.parent,stdout=f,
+                         stderr=subprocess.STDOUT,timeout=c['case_timeout_seconds'],env=env)
+    text=log.read_text(errors='replace')
+    if p.returncode or TRIM_ERRORS.search(text) or marker not in text:
+        raise ValueError('Incomplete/error TB10 simulation; see '+str(log))
+    return list(dict.fromkeys(l.strip() for l in text.splitlines()
+                             if re.search(r'warning|unsupported|not recognized',l,re.I)))[:30]
+
+
+def run_trim_case(case,*,root,source,config,fingerprint,ngspice,retry_failed):
+    import csv
+    import gzip
+    d=root/'cases'/case['case_id'];d.mkdir(parents=True,exist_ok=True)
+    cache=d/'result.json'
+    if config['resume'] and cache.is_file():
+        old=json.loads(cache.read_text())
+        if old.get('fingerprint')==fingerprint and (
+                old.get('status')=='complete' and (d/'waveforms.txt.gz').is_file()
+                or old.get('status')!='complete' and not retry_failed):
+            return dict(old,resumed=True)
+    # Changed inputs/retries get a new artifact directory; never discard old trim traces.
+    attempt=d/'attempts'/('run_'+str(time.time_ns()))
+    attempt.mkdir(parents=True,exist_ok=False)
+    result=dict(case,fingerprint=fingerprint,status='failed',resumed=False,
+                artifact_directory=str(attempt.relative_to(root)))
+    began=time.monotonic()
+    try:
+        source=source_for_case(source,case,TRIM)
+        deck=attempt/'circuit.spice'
+        deck.write_text(source+trim_sweep_control(config)+'.end\n')
+        result['simulator_warnings']=trim_simulate(deck,config,ngspice,'TRIM_SWEEP_COMPLETE')
+        rows=trim_read_sweep(attempt/'trim_sweep.txt',config)
+        with (attempt/'trim_sweep.csv').open('w',newline='') as f:
+            writer=csv.DictWriter(f,fieldnames=list(rows[0]))
+            writer.writeheader();writer.writerows(rows)
+        metrics=trim_dc_metrics(rows,config);result['metrics']=metrics
+        waveform='BEGIN_TRIM_SWEEP\n'+(attempt/'trim_sweep.txt').read_text()+'END_TRIM_SWEEP\n'
+        if config['trim_startup']:
+            def job(v):
+                folder=attempt/('startup_'+str(v).replace('.','p')+'V');folder.mkdir()
+                text,cols=trim_startup_deck(source,v,metrics['calibration_code'],config)
+                deck=folder/'circuit.spice';deck.write_text(text)
+                atomic_json(folder/'columns.json',['time_s']+cols)
+                try:
+                    warnings=trim_simulate(deck,config,ngspice,'STARTUP_COMPLETE')
+                    m,wave=trim_startup_metrics(folder/'trace.txt',cols,config)
+                    return dict(avdd_V=v,code=metrics['calibration_code'],status='COMPLETE',**m),wave,warnings
+                except Exception as exc:
+                    return dict(avdd_V=v,code=metrics['calibration_code'],status='UNRESOLVED',error=str(exc)),'',[]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(2,int(config['parallel_jobs']))) as pool:
+                for m,wave,warnings in pool.map(job,[3.3,5.0]):
+                    metrics['startup'].append(m)
+                    result['simulator_warnings']+=warnings
+                    name='TRIM_STARTUP_'+str(m['avdd_V']).replace('.','P')
+                    waveform+='BEGIN_'+name+'\n'+wave+'\nEND_'+name+'\n'
+        metrics['startup_pass']=(all(m['status']=='COMPLETE' and all(e['status']=='PASS' for e in m['events'])
+                                     for m in metrics['startup']) if config['trim_startup'] else None)
+        metrics['trim_gate_screen_pass']=(all(m['status']=='COMPLETE' and not any(
+            dev['above_gate_screen'] for dev in m['trim_switch_stress']) for m in metrics['startup'])
+            if config['trim_startup'] else None)
+        (attempt/'case_report.txt').write_text(waveform+'END_OF_TB10_RESISTOR_TRIM_RUN\n')
+        atomic_json(attempt/'metrics.json',metrics)
+        if any(m['status']!='COMPLETE' for m in metrics['startup']):
+            raise ValueError('One or more TB10 startup analyses are unresolved; see metrics and attempt logs')
+        with gzip.open(d/'waveforms.txt.gz','wt') as f:f.write(waveform)
+        result['status']='complete'
+    except subprocess.TimeoutExpired:
+        result.update(status='timeout',error='Exceeded case_timeout_seconds; no performance pass')
+    except Exception as exc:
+        result['error']=str(exc)
+    result['elapsed_seconds']=round(time.monotonic()-began,3)
+    atomic_json(attempt/'result.json',result)
+    atomic_json(cache,result)
+    return result
+
+
+def summarize_trim(results):
+    ok=[r for r in results if r['status']=='complete']
+    return dict(attempted=len(results),simulation_complete=len(ok),
+                execution_failed_or_timed_out=len(results)-len(ok),
+                scope='TT/25 C; all 128 codes at AVDD 3.3/5 V, DVDD 3.3 V; digital-first',
+                completed_DC_points=256*len(ok),
+                calibration_codes=[r['metrics']['calibration_code'] for r in ok],
+                fixed_code_accuracy_pass_count=sum(r['metrics']['fixed_code_accuracy_pass'] for r in ok),
+                startup_pass_count=sum(r['metrics']['startup_pass'] is True for r in ok),
+                startup_not_run_count=sum(r['metrics']['startup_pass'] is None for r in ok),
+                full_PVT_qualified=False)
 
 # Resume compatibility for the exact previously delivered suite-v9 runner.
 # This compressed source is DATA ONLY: it is decompressed to reproduce the old

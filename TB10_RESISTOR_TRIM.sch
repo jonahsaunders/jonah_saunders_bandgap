@@ -9,7 +9,7 @@ T {TB10: 7-bit resistor-trim sweep} 200 20 0 0 0.5 0.5 {}
 T {TT / 25 C: all 128 codes at AVDD=3.3 V and 5 V; DVDD stays 3.3 V.
 Bit 1 bypasses its resistor. Bit 0 includes it. Target VREF=1.194 V.} 200 70 0 0 0.28 0.28 {}
 T {No extra output load. Both grounds are connected to 0 in this bench.
-This is a DC calibration sweep, not a startup or reliability signoff.} 200 720 0 0 0.28 0.28 {}
+TB10 runner: DC calibration plus selected-code startup/restart. Not reliability signoff.} 200 720 0 0 0.28 0.28 {}
 C {Bandgap_Core_Res.sym} 500 400 0 0 {name=x1}
 C {lab_pin.sym} 340 220 0 0 {name=p0 lab=avdd}
 C {lab_pin.sym} 340 580 0 0 {name=p1 lab=0}
@@ -68,6 +68,50 @@ N 1740 420 1740 450 {lab=b6}
 N 1740 510 1740 540 {lab=0}
 C {gnd.sym} 1740 540 0 0 {name=g8 lab=0}
 C {lab_pin.sym} 1740 420 0 0 {name=p38 lab=b6}
-C {code.sym} 900 650 0 0 {name=MODELS_AND_TEST only_toplevel=true
-format="tcleval([read_data_nonewline [abs_sym_path trim_testbench/generated/manual_setup.spice]])"
-value="Run python3 trim_testbench/run_trim.py --prepare-only before netlisting.\nGenerated setup resolves model and result paths for this checkout."}
+C {code.sym} 900 650 0 0 {name=MODELS only_toplevel=true value="* TB_PVT_MODELS_BEGIN
+.include /foss/pdks/gf180mcuD/libs.tech/ngspice/design.ngspice
+.lib /foss/pdks/gf180mcuD/libs.tech/ngspice/sm141064.ngspice typical
+.lib /foss/pdks/gf180mcuD/libs.tech/ngspice/sm141064.ngspice bjt_typical
+.lib /foss/pdks/gf180mcuD/libs.tech/ngspice/sm141064.ngspice res_typical
+* GF180 2p0fF MIM fit, charge-form ngspice compatibility implementation.
+* Derived from GlobalFoundries PDK Authors (2022), Apache-2.0:
+* https://github.com/google/globalfoundries-pdk-libs-gf180mcu_fd_pr
+* Same geometry, voltage/temperature coefficients, leakage and corner factors.
+* Differential C(V)=C0*(1+a*V+b*V^2) is implemented as
+* Q(V)=C0*(V+a*V^2/2+b*V^3/3), so dQ/dV exactly equals C(V).
+* This avoids ngspice's poorly scaled unity-capacitor C-expression expansion.
+* Do not also include mimcap_typical: it would redefine cap_mim_2f0fF.
+.param mim_corner_2p0fF=1 mc_c_cox_2p0fF=0
+.subckt cap_mim_2f0fF  1 2  c_length=l  c_width=w dtemp=0 par=1
+.param gleak='9.51e-10/5*10000'
+.param c_cox='1.99e-3*mim_corner_2p0fF'
+.param c_capsw='2.383e-10*mim_corner_2p0fF'
+.param c_vcr1='0+(c_width>5u||c_length>5u)*8.742e-6+(c_width<=5u||c_length<=5u)*(-81e-6)'
+.param c_vcr2='0+(c_width>5u||c_length>5u)*9.188e-6+(c_width<=5u||c_length<=5u)*(16.7e-6)'
+
+.param c_tnom=25
+.param c_tc1=1.46e-5
+.param c_tc2=-5.55e-8
+.param c_AREA='c_length*c_width'
+.param c_PERI='2*(c_length+c_width)'
+
+.param c_c0='(c_cox*c_AREA+c_capsw*c_PERI)*(1+c_tc1*(temper +dtemp -c_tnom)+c_tc2*(temper+dtemp-c_tnom)*(temper+dtemp-c_tnom))'
+*
+c_cap 1 2 Q='c_c0*(v(1,2)+c_vcr1*v(1,2)*v(1,2)/2+c_vcr2*v(1,2)*v(1,2)*v(1,2)/3)*(1+mc_c_cox_2p0fF)'
+r_leak 1 2 r='1/(gleak*c_AREA)' tc1=c_tc1 tc2=c_tc2 dtemp=dtemp
+.ends cap_mim_2f0fF
+* Bootstrap nominal process; runner selects each corner independently. Mismatch disabled. MIM compatibility model above is intentional.
+.options tnom=25 numdgt=15 method=gear maxord=2 reltol=1e-5 vntol=1e-7 abstol=1e-13 itl4=200
+.param sw_stat_global=0 sw_stat_mismatch=0 fnoicor=0
+.param VDD_RUN=5
+.temp 25
+* TB_PVT_MODELS_END
+"}
+C {code.sym} 530 420 0 0 {name=TEST only_toplevel=true format="@value" value=".control
+set noaskquit
+echo Run run_bandgap.py --configure before simulating from Xschem.
+shell python3 run_bandgap.py --deck TB10_RESISTOR_TRIM.spice --test TB10_RESISTOR_TRIM
+echo RUNNER_RETURNED_CHECK_REPORT_AND_ERRORS
+quit
+.endc
+"}
