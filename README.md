@@ -4,6 +4,12 @@ A GF180 bandgap reference project with Xschem schematics, ten independent ngspic
 
 This branch contains the cleaned startup-repaired core and the physical resistor-trim variant. TB10 uses the same runner, configuration, reports and plotter as TB01–TB09; no separate trim package is required. Historical and current validation notes are in [VALIDATION.md](VALIDATION.md).
 
+## Core schematic
+
+[![Bandgap core schematic, including the reference, startup, folded cascode and bias circuits](docs/images/bandgap-core.svg)](docs/images/bandgap-core.svg)
+
+[View full-size schematic](docs/images/bandgap-core.svg) · [Open the Xschem source](Bandgap_Core.sch).
+
 ## Repository contents
 
 | Files | Purpose |
