@@ -10,7 +10,7 @@ T {TT / 25 C: all 128 codes at AVDD=3.3 V and 5 V; DVDD stays 3.3 V.
 Bit 1 bypasses its resistor. Bit 0 includes it. Target VREF=1.194 V.} 200 70 0 0 0.28 0.28 {}
 T {No extra output load. Both grounds are connected to 0 in this bench.
 TB10 runner: DC calibration plus selected-code startup/restart. Not reliability signoff.} 200 720 0 0 0.28 0.28 {}
-C {Bandgap_Core_Res.sym} 500 400 0 0 {name=x1}
+C {tcleval([file join [file dirname [xschem get schname]] Bandgap_Core_Res.sym])} 500 400 0 0 {name=x1}
 C {lab_pin.sym} 340 220 0 0 {name=p0 lab=avdd}
 C {lab_pin.sym} 340 580 0 0 {name=p1 lab=0}
 C {lab_pin.sym} 660 400 0 0 {name=p2 lab=vref}

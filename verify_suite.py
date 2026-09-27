@@ -225,9 +225,31 @@ class SuiteChecks(unittest.TestCase):
                 rb.configure(folder,folder/'netlists')
             self.assertEqual(first,{p.name:p.read_text() for p in folder.glob('*.sch')})
             trim=first[rb.TRIM+'.sch']
-            self.assertIn(str(folder/'Bandgap_Core_Res.sym'),trim)
+            self.assertIn('C {tcleval([file join [file dirname [xschem get schname]] Bandgap_Core_Res.sym])}',trim)
             self.assertIn('--test TB10_RESISTOR_TRIM',trim)
             self.assertIn('quit\n.endc',trim)
             self.assertNotIn('trim_testbench/',trim)
+
+    def test_configure_repairs_legacy_symbols_and_keeps_them_portable(self):
+        import contextlib
+        import io
+        import re
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)/'moved project with spaces';folder.mkdir()
+            for test in rb.TESTS:
+                text=(HERE/(test+'.sch')).read_text()
+                # Model an older checkout, including an obsolete/wrong core alias.
+                text,count=re.subn(r'C \{[^\n{}]*Bandgap_Core[^\n{}]*\}',
+                                   'C {/old/location/Bandgap_Core(1).sym}',text)
+                self.assertEqual(count,1,test)
+                (folder/(test+'.sch')).write_text(text)
+            with contextlib.redirect_stdout(io.StringIO()):
+                rb.configure(folder,folder/'netlists')
+            for test in rb.TESTS:
+                core=('Bandgap_Core_Res' if test==rb.TRIM else
+                      'Bandgap_Core_LoopProbe' if test==rb.LG else 'Bandgap_Core')
+                reference='C {tcleval([file join [file dirname [xschem get schname]] '+core+'.sym])}'
+                self.assertIn(reference,(folder/(test+'.sch')).read_text(),test)
+                self.assertIn(reference,(HERE/(test+'.sch')).read_text(),test)
 
 if __name__=='__main__':unittest.main(verbosity=2)

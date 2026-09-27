@@ -97,4 +97,4 @@ C {lab_pin.sym} 1410 270 0 0 {name=p_bias_f lab=lg_bias_f}
 C {isource.sym} 1540 240 0 0 {name=ILG_BIAS value="DC 0 AC 0"}
 C {gnd.sym} 1540 210 2 0 {name=g_bias lab=GND}
 C {lab_pin.sym} 1540 270 0 0 {name=i_bias_e lab=lg_bias_e}
-C {/foss/designs/chipalooza-bandgap/Jonah_Saunders_Bandgap/Bandgap_Core_LoopProbe.sym} 400 240 0 0 {name=x1}
+C {tcleval([file join [file dirname [xschem get schname]] Bandgap_Core_LoopProbe.sym])} 400 240 0 0 {name=x1}

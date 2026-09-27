@@ -22,6 +22,7 @@ This branch contains the cleaned startup-repaired core and the physical resistor
 | `run_bandgap.py` | Unified simulation runner and path configuration |
 | `plot_bandgap.py` | Figures, combined PDF, and metrics CSVs |
 | `verify_suite.py` | Software checks that require no simulator or PDK |
+| `verify_xschem_symbols.py` | Xschem checks for symbol lookup after moving the project |
 
 Keep these project files together: the schematic launchers and Python imports depend on this layout.
 
@@ -38,7 +39,9 @@ python3 verify_suite.py
 python3 run_bandgap.py --configure --netlist-dir "$HOME/.xschem/simulations"
 ```
 
-Use your actual Xschem netlist directory; omit `--netlist-dir` to use `~/.xschem/simulations`. Some FOSS containers use `/headless/.xschem/simulations`. Configuration rewrites the ten launchers and binds their symbols to this repository folder. Run it after cloning or moving the folder. It does not modify any core schematic. Review the resulting local path changes before committing testbench schematics.
+The testbenches automatically resolve their core symbols beside the open schematic, even when Xschem was started in another directory or the repository folder has moved. Keep each core's `.sym` and `.sch` files beside the testbenches. TB05 selects `Bandgap_Core_LoopProbe`; TB10 selects `Bandgap_Core_Res`; the other benches select `Bandgap_Core`. No library-path edits or configuration step are needed just to display these symbols.
+
+Use your actual Xschem netlist directory; omit `--netlist-dir` to use `~/.xschem/simulations`. Some FOSS containers use `/headless/.xschem/simulations`. Configuration rewrites the ten simulation launchers and preserves portable core-symbol references; it also repairs older absolute symbol paths. Run it after cloning or moving the folder to update the Python launcher and netlist paths. It does not modify any core schematic. Close open testbenches before configuring, then reopen them and regenerate their netlists. Review the resulting local launcher-path changes before committing testbench schematics.
 
 **TB01–TB09 default to `full`, including TB05. TB10 defaults separately to `trim_nominal`.** For a quick initial run, pass `--profile smoke` as below. To use smoke runs from Xschem, set `default_profile` and TB05's `test_profiles` entry to `smoke` before simulating.
 
@@ -285,15 +288,27 @@ See `VALIDATION.md` for the software and representative local simulator checks p
 Run the integrated software checks:
 
 ```bash
-python3 -m py_compile run_bandgap.py plot_bandgap.py verify_suite.py
+python3 -m py_compile run_bandgap.py plot_bandgap.py verify_suite.py verify_xschem_symbols.py
 python3 verify_suite.py
 ```
 
-The 25 checks use only the Python standard library; they do not require ngspice,
+The 26 checks use only the Python standard library; they do not require ngspice,
 Xschem or the PDK and are not electrical signoff. They cover the existing suite,
 all ten launchers, trim polarity/code coverage, fixed-code calibration, failure
 detection and startup readiness. Electrical and plotting checks are documented
 in [VALIDATION.md](VALIDATION.md).
+
+To verify symbol lookup with Xschem and your configured GF180 symbol libraries:
+
+```bash
+python3 verify_xschem_symbols.py
+```
+
+This generates 40 temporary netlists covering all ten benches, fresh and moved
+folders (including spaces), an unrelated working directory containing stale
+same-named symbols, and relocation after `--configure`. It checks that the circuit
+netlists match an absolute-path baseline. It does not run electrical simulations
+or modify the project files.
 
 Generated simulation results and Python caches are excluded by `.gitignore`.
 The inherited GF180-derived MIM block is embedded in TB10's MODELS section,
