@@ -4,6 +4,203 @@ A GF180 bandgap reference project with Xschem schematics, ten independent ngspic
 
 This branch contains the cleaned startup-repaired core and the physical resistor-trim variant. TB10 uses the same runner, configuration, reports and plotter as TB01–TB09; no separate trim package is required. Historical and current validation notes are in [VALIDATION.md](VALIDATION.md).
 
+<a id="first-run"></a>
+
+## Run simulations
+
+Start with one **smoke** run to check your setup, then run the full suite below.
+There are ten independent testbenches: clicking **Simulate** in one schematic
+runs only that bench. TB01–TB09 support `smoke` and `full`; TB10 uses
+`trim_nominal` and must not be included in a `--profile full` sweep.
+
+### 1. Open the correct environment and get the project
+
+Run these commands in **Bash inside your Linux/FOSS environment**. The runner
+uses POSIX file locks (`fcntl`), so it does not run directly in Windows
+PowerShell. Python 3.9+, Xschem, ngspice, and the GF180 symbol/model libraries
+must already be installed in that environment. The PDK is not bundled here.
+
+If you do not already have the repository:
+
+```bash
+git clone https://github.com/jonahsaunders/jonah_saunders_bandgap.git
+cd jonah_saunders_bandgap
+```
+
+If you already cloned or extracted it, open a terminal in that folder instead.
+Keep the core `.sch`/`.sym` files, testbenches, Python scripts, and JSON together.
+Check that the required commands are available:
+
+```bash
+command -v python3 xschem ngspice
+```
+
+All three commands should print a path. Xschem must load the **GF180** symbol
+library. In IIC-OSIC-TOOLS with its usual PDK-aware `xschemrc`, select GF180 in
+this terminal before launching Xschem:
+
+```bash
+export PDK=gf180mcuD
+```
+
+The testbench `MODELS` blocks currently reference
+`/foss/pdks/gf180mcuD/libs.tech/ngspice/design.ngspice` and
+`/foss/pdks/gf180mcuD/libs.tech/ngspice/sm141064.ngspice`. If your PDK is elsewhere,
+edit those paths in the testbenches before netlisting. `--configure` below
+updates project/launcher paths, **not PDK model paths**.
+
+### 2. Install dependencies and configure the launchers
+
+From the repository folder:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 verify_suite.py
+
+NETLIST_DIR="$HOME/.xschem/simulations"
+mkdir -p "$NETLIST_DIR"
+python3 run_bandgap.py --configure --netlist-dir "$NETLIST_DIR"
+```
+
+The virtual environment is optional if NumPy and Matplotlib are already
+installed. In a new terminal, return to the repository and activate `.venv`
+again. `verify_suite.py` checks the software; it does not simulate the circuit.
+
+Use the same netlist directory that Xschem uses. In a typical FOSS container,
+`$HOME` is `/headless`, so the example resolves to
+`/headless/.xschem/simulations`. Substitute your actual directory if different;
+the terminal examples use `NETLIST_DIR` consistently.
+
+Close any open testbenches before configuring, then reopen them. Configuration
+updates all ten simulation launchers; rerun it after moving the project or
+changing the netlist directory. Core symbols are located automatically beside
+each schematic and do not require this setup step just to display. Configuration
+preserves those portable symbol references and does not modify the core circuits.
+
+### 3. Generate a netlist and run one smoke test
+
+These commands run a short PSRR check using TB01's own netlist:
+
+```bash
+NETLIST_DIR="${NETLIST_DIR:-$HOME/.xschem/simulations}"
+mkdir -p "$NETLIST_DIR"
+xschem -n -x -q -r -s -o "$NETLIST_DIR" \
+  -N TB01_PSRR.spice TB01_PSRR.sch
+
+python3 run_bandgap.py --test TB01_PSRR \
+  --deck "$NETLIST_DIR/TB01_PSRR.spice" --profile smoke
+
+python3 plot_bandgap.py --profile smoke --test TB01_PSRR
+```
+
+Check the Xschem output for missing-symbol/netlisting errors before running the
+Python command. The first command exports the SPICE netlist; the Python runner
+then invokes ngspice. Always regenerate the netlist after schematic or model-path
+edits, and use the matching `TBxx_NAME.spice` file for each `--test`.
+
+The report is `results/smoke/TB01_PSRR_UPLOAD_THIS.txt`; figures and the combined
+PDF are in `results/smoke/plots/`. Check that the report is complete and review
+the performance metrics before starting the full sweep.
+
+**Using the Xschem window:** launch `xschem TB01_PSRR.sch` from this configured
+terminal, then click **Netlist** and **Simulate**. This follows the profiles in
+`bandgap_config.json`: TB01–TB09 default to `full`, while TB10 defaults to
+`trim_nominal`. For GUI smoke runs, set `default_profile` to `smoke` and
+`test_profiles.TB05_LOOP_STABILITY` to `smoke`; keep
+`test_profiles.TB10_RESISTOR_TRIM` at `trim_nominal`. Restore the first two
+settings to `full` when ready. The terminal's explicit `--profile smoke`
+does not change the GUI defaults.
+
+### 4. Run all ten testbenches
+
+Paste this complete block into Bash from the repository folder. It generates
+all ten netlists, runs each bench, and plots the available results. It stops
+if a netlisting command fails and continues to the remaining benches if an
+individual simulation runner fails, printing that bench's name.
+
+```bash
+(
+  set -e
+  SUITE_PROFILE=full
+  NETLIST_DIR="${NETLIST_DIR:-$HOME/.xschem/simulations}"
+  mkdir -p "$NETLIST_DIR"
+
+  for sch in TB[0-9][0-9]_*.sch; do
+    bench="${sch%.sch}"
+    xschem -n -x -q -r -s -o "$NETLIST_DIR" \
+      -N "$bench.spice" "$sch"
+    test -s "$NETLIST_DIR/$bench.spice"
+  done
+
+  failed=0
+  for sch in TB[0-9][0-9]_*.sch; do
+    bench="${sch%.sch}"
+    profile="$SUITE_PROFILE"
+    if [ "$bench" = "TB10_RESISTOR_TRIM" ]; then
+      profile=trim_nominal
+    fi
+
+    python3 run_bandgap.py --test "$bench" \
+      --deck "$NETLIST_DIR/$bench.spice" \
+      --profile "$profile" --retry-failed || {
+        echo "CHECK ERRORS: $bench"
+        failed=1
+      }
+  done
+
+  python3 plot_bandgap.py
+  exit "$failed"
+)
+```
+
+For a quick check of every bench first, change `SUITE_PROFILE=full` to
+`SUITE_PROFILE=smoke`. TB10 still runs its nominal trim bundle, including the
+code sweep and selected-code startup/restart; it has no separate smoke profile.
+
+The full sweep contains tens of thousands of cases and can take substantial
+time, especially TB03 and TB09. Benches run sequentially above; each runner uses
+`parallel_jobs` from the JSON (two by default for `full`). Keep the terminal and
+container running until the suite finishes. Do not use `--max-cases` for a
+complete run; that option intentionally produces incomplete coverage.
+
+### 5. Find results, resume, and check failures
+
+With the supplied `output_directory` setting, outputs are beside the project:
+
+| Run | Reports and case data | Figures, PDF, and CSVs |
+|---|---|---|
+| TB01–TB09 full | `results/full/` | `results/full/plots/` |
+| TB01–TB09 smoke | `results/smoke/` | `results/smoke/plots/` |
+| TB10 trim | `results/trim_nominal/` | `results/trim_nominal/plots/` |
+
+Each bench produces `TBxx_NAME_UPLOAD_THIS.txt`. The plot folders contain
+`bandgap_plots.pdf`, PNG figures, and metrics CSVs. You can regenerate plots at
+any time with `python3 plot_bandgap.py`; it discovers every available profile.
+
+To resume an interrupted suite, rerun the same block. Matching completed cases
+are reused, and `--retry-failed` retries execution failures. Changes to the
+configuration, deck, runner, models, or simulator can invalidate saved results.
+The flag does not rerun completed cases merely because their performance missed
+a target. A runner exit code of 0 means execution completed, **not that the
+circuit met every specification**; read the report's summary and metrics.
+
+Common setup problems:
+
+| Symptom | What to check |
+|---|---|
+| `MISSING SYMBOL` for a core | Use the complete updated repository, keep the corresponding core `.sym` and `.sch` beside the bench, and close/reopen the schematic. |
+| Missing GF180 transistor/passive symbols | Load the GF180 Xschem library; selecting another PDK will not supply those symbols. |
+| Missing model file | Correct the paths in each bench's `MODELS` block, then regenerate its netlist. |
+| Python runner or `.spice` file not found from **Simulate** | Close the bench, rerun `--configure` with the actual Xschem netlist directory, reopen, and click **Netlist** again. |
+| `No module named fcntl` | Run inside Linux/FOSS rather than native Windows Python. |
+| TB10 rejects the selected profile | Use `--profile trim_nominal`; TB10 is a nominal trim test, not a full PVT qualification. |
+
+For the per-bench measurements and case counts, see [Test coverage](#test-coverage).
+For cache/report details, see [Results, resume, and what to upload](#results-resume-and-what-to-upload).
+
+
 ## Core schematic
 
 [![Bandgap core schematic, including the reference, startup, folded cascode and bias circuits](docs/images/bandgap-core.svg)](docs/images/bandgap-core.svg)
@@ -25,34 +222,6 @@ This branch contains the cleaned startup-repaired core and the physical resistor
 | `verify_xschem_symbols.py` | Xschem checks for symbol lookup after moving the project |
 
 Keep these project files together: the schematic launchers and Python imports depend on this layout.
-
-## First run
-
-Clone this repository (or extract the repository ZIP), then open a terminal in its root folder in your Linux/FOSS/Xschem environment.
-
-```bash
-# Optional: isolate plotting dependencies in a virtual environment.
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-python3 verify_suite.py
-python3 run_bandgap.py --configure --netlist-dir "$HOME/.xschem/simulations"
-```
-
-The testbenches automatically resolve their core symbols beside the open schematic, even when Xschem was started in another directory or the repository folder has moved. Keep each core's `.sym` and `.sch` files beside the testbenches. TB05 selects `Bandgap_Core_LoopProbe`; TB10 selects `Bandgap_Core_Res`; the other benches select `Bandgap_Core`. No library-path edits or configuration step are needed just to display these symbols.
-
-Use your actual Xschem netlist directory; omit `--netlist-dir` to use `~/.xschem/simulations`. Some FOSS containers use `/headless/.xschem/simulations`. Configuration rewrites the ten simulation launchers and preserves portable core-symbol references; it also repairs older absolute symbol paths. Run it after cloning or moving the folder to update the Python launcher and netlist paths. It does not modify any core schematic. Close open testbenches before configuring, then reopen them and regenerate their netlists. Review the resulting local launcher-path changes before committing testbench schematics.
-
-**TB01–TB09 default to `full`, including TB05. TB10 defaults separately to `trim_nominal`.** For a quick initial run, pass `--profile smoke` as below. To use smoke runs from Xschem, set `default_profile` and TB05's `test_profiles` entry to `smoke` before simulating.
-
-Open a `TBxx_*.sch`, regenerate its netlist, and simulate that bench. Each schematic invokes only its own test. To smoke-test a generated netlist directly:
-
-```bash
-python3 run_bandgap.py --test TB07_NOISE --deck /headless/.xschem/simulations/TB07_NOISE.spice --profile smoke
-python3 plot_bandgap.py --profile smoke
-```
-
-The simulator runner needs Python 3.9+ and ngspice on PATH. Plotting additionally needs NumPy and Matplotlib. The runner uses Linux/POSIX file locks, matching the FOSS environment. Your existing GF180 symbol library and model installation are still required; the PDK is not bundled. `--configure` adjusts project/netlist paths, not PDK model paths. If necessary, edit the MODELS block to point to your installation.
 
 ## One JSON file
 
