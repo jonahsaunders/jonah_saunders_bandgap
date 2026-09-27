@@ -38,16 +38,21 @@ command -v python3 xschem ngspice
 
 All three commands should print a path. **Select GF180 before launching Xschem.**
 IIC-OSIC-TOOLS can start with another PDK selected (including IHP SG13G2); the
-same Xschem executable then searches that PDK's symbols. Its standard
-PDK-aware `xschemrc` uses these environment variables:
+same Xschem executable then searches that PDK's symbols. Use the container's
+PDK selector in the same terminal where you will run the simulations:
 
 ```bash
-export PDK_ROOT=/foss/pdks
-export PDK=gf180mcuD
+sak-pdk gf180mcuD
 ```
 
+This updates `PDK`, `PDKPATH`, and ngspice's `SPICE_USERINIT_DIR` together, as
+well as the other PDK-specific tool settings. Setting only `PDK` can leave
+simulator startup settings pointing at the previous technology.
+
 This selection belongs to the current terminal; a fresh terminal can default to
-another PDK. The smoke and full-suite commands below repeat it before netlisting.
+another PDK. The smoke and full-suite commands below repeat it before netlisting
+by sourcing `/foss/tools/sak/sak-pdk-script.sh`, the script behind the interactive
+`sak-pdk` alias. This also works in a Bash script where that alias is unavailable.
 Xschem should report
 `180MCU_MODELS: /foss/pdks/gf180mcuD/libs.tech/ngspice`.
 If its startup output instead mentions `ihp-sg13g2`, stop and select GF180 before
@@ -94,8 +99,7 @@ preserves those portable symbol references and does not modify the core circuits
 These commands run a short PSRR check using TB01's own netlist:
 
 ```bash
-export PDK_ROOT=/foss/pdks
-export PDK=gf180mcuD
+source /foss/tools/sak/sak-pdk-script.sh gf180mcuD
 NETLIST_DIR="${NETLIST_DIR:-/headless/.xschem/simulations}"
 mkdir -p "$NETLIST_DIR"
 xschem -n -x -q -r -s -o "$NETLIST_DIR" \
@@ -116,11 +120,11 @@ The report is `results/smoke/TB01_PSRR_UPLOAD_THIS.txt`; figures and the combine
 PDF are in `results/smoke/plots/`. Check that the report is complete and review
 the performance metrics before starting the full sweep.
 
-**Using the Xschem window:** launch
-`PDK_ROOT=/foss/pdks PDK=gf180mcuD xschem TB01_PSRR.sch` from the repository
-folder in the container terminal, then click **Netlist** and **Simulate**. An
-already-open Xschem window keeps its earlier PDK setup; close it and relaunch
-with this command if it loaded IHP. This follows the profiles in
+**Using the Xschem window:** run `sak-pdk gf180mcuD`, then launch
+`xschem TB01_PSRR.sch` from the repository folder in that same container
+terminal. Click **Netlist** and **Simulate**. An already-open Xschem window
+keeps its earlier PDK setup; close it and relaunch after selecting GF180 if it
+loaded IHP. This follows the profiles in
 `bandgap_config.json`: TB01–TB09 default to `full`, while TB10 defaults to
 `trim_nominal`. For GUI smoke runs, set `default_profile` to `smoke` and
 `test_profiles.TB05_LOOP_STABILITY` to `smoke`; keep
@@ -138,8 +142,7 @@ individual simulation runner fails, printing that bench's name.
 ```bash
 (
   set -e
-  export PDK_ROOT=/foss/pdks
-  export PDK=gf180mcuD
+  source /foss/tools/sak/sak-pdk-script.sh gf180mcuD
   SUITE_PROFILE=full
   NETLIST_DIR="${NETLIST_DIR:-/headless/.xschem/simulations}"
   mkdir -p "$NETLIST_DIR"
@@ -208,7 +211,7 @@ Common setup problems:
 | Symptom | What to check |
 |---|---|
 | `MISSING SYMBOL` for a core | Use the complete updated repository, keep the corresponding core `.sym` and `.sch` beside the bench, and close/reopen the schematic. |
-| Missing `symbols/nfet_03v3.sym`, `symbols/pnp_05p00x05p00.sym`, or other GF180 device symbols | If startup mentions `ihp-sg13g2`, run `export PDK_ROOT=/foss/pdks` and `export PDK=gf180mcuD` in the same container terminal, then regenerate every netlist by rerunning the complete suite block. Relaunch any Xschem window that loaded IHP. |
+| Missing `symbols/nfet_03v3.sym`, `symbols/pnp_05p00x05p00.sym`, or other GF180 device symbols | If startup mentions `ihp-sg13g2`, run `sak-pdk gf180mcuD` in the same container terminal, then regenerate every netlist by rerunning the complete suite block. Relaunch any Xschem window that loaded IHP. |
 | Missing model file | Correct the paths in each bench's `MODELS` block, then regenerate its netlist. |
 | Python runner or `.spice` file not found from **Simulate** | Close the bench, rerun `--configure` with the actual Xschem netlist directory, reopen, and click **Netlist** again. |
 | `No module named fcntl` | Run inside Linux/FOSS rather than native Windows Python. |
