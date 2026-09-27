@@ -75,4 +75,4 @@ shell python3 \"/foss/designs/chipalooza-bandgap/Jonah_Saunders_Bandgap/run_band
 echo RUNNER_RETURNED_CHECK_REPORT_AND_ERRORS
 .endc
 "}
-C {/foss/designs/chipalooza-bandgap/Jonah_Saunders_Bandgap/Bandgap_Core.sym} 400 240 0 0 {name=x1}
+C {tcleval([file join [file dirname [xschem get schname]] Bandgap_Core.sym])} 400 240 0 0 {name=x1}

@@ -1,3 +1,25 @@
+# Portable core-symbol validation — 2026-09-27
+
+All ten testbenches now locate their intended core symbol beside the open
+schematic through Xschem's Tcl path evaluation. `--configure` preserves this
+reference and repairs older absolute references. It also escapes launcher quotes
+through both Xschem parsing layers so folder names containing spaces remain intact.
+
+- All 26 software checks passed.
+- Xschem 3.4.8RC with the installed GF180 libraries generated 40 netlists: ten
+  absolute-reference baselines, ten fresh-checkout exports, ten after relocation
+  to a folder containing spaces, and ten after configuring and moving again.
+- Every export ran from an unrelated working directory containing invalid
+  same-named core symbols. All intended cores resolved, and all circuit netlists
+  matched their baseline after excluding source-path comments and launchers.
+- Configured launchers retained complete control blocks and correctly quoted
+  runner/netlist arguments. Their absolute execution paths still require
+  `--configure` after moving; core-symbol display does not.
+
+No core schematic or symbol was edited, and no electrical simulations were run
+for this change. Reproduce the Xschem checks with `python3 verify_xschem_symbols.py`
+in the configured GF180 environment. Earlier electrical validation follows.
+
 # TB10 unified workflow validation — 2026-09-18
 
 TB10 is integrated into `run_bandgap.py`, `plot_bandgap.py`,

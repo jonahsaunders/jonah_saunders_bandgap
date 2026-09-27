@@ -722,16 +722,19 @@ def configure(folder,netlist_dir):
             pass # TB05 default profile is selected in the single configuration file.
         value='.control\nset noaskquit\necho BANDGAP_SINGLE_RUNNER_V9_'+test+'\n'+cmd+'\necho RUNNER_RETURNED_CHECK_REPORT_AND_ERRORS\n.endc\n'
         if test == TRIM: value=value.replace('.endc\n','quit\n.endc\n')
-        encoded=value.replace('\\','\\\\').replace('"','\\"')
+        # Quotes pass through both the .sch record reader and the attribute
+        # parser; preserve them so paths with spaces reach the netlist intact.
+        encoded=value.replace('\\',r'\\\\').replace('"',r'\\\"')
         replacement='C {code.sym} 530 420 0 0 {name=TEST only_toplevel=true format="@value" value="'+encoded+'"}'
         s,n=re.subn(r'C \{code.sym\} 530 420 0 0 \{name=TEST.*?\n"\}',lambda m:replacement,s,flags=re.S)
         if n!=1:raise ValueError('Expected one TEST block: '+str(p))
-        # Bind to this folder's exact core, not an old library alias.
+        # Resolve beside the open schematic, independently of Xschem's working
+        # directory and library search order. Keep the saved reference portable.
         core_name = 'Bandgap_Core_Res.sym' if test == TRIM else (
             'Bandgap_Core_LoopProbe.sym' if test == LG else 'Bandgap_Core.sym')
-        core=str(folder/core_name);quoted(core)
+        core='tcleval([file join [file dirname [xschem get schname]] '+core_name+'])'
         position = '500 400' if test == TRIM else '400 240'
-        pattern = r'C \{[^\n{}]*Bandgap_Core(?:_LoopProbe|_Res)?(?:\(1\))?\.sym\} '+position+r' 0 0 \{name=x1\}'
+        pattern = r'C \{[^\n{}]*Bandgap_Core(?:_LoopProbe|_Res)?(?:\(1\))?\.sym(?:\]\))?\} '+position+r' 0 0 \{name=x1\}'
         s,n=re.subn(pattern,lambda m:'C {'+core+'} '+position+' 0 0 {name=x1}',s)
         if n!=1:raise ValueError('Expected one core instance: '+str(p))
         updates.append((p,s))
