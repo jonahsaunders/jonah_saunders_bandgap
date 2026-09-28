@@ -1,3 +1,34 @@
+# Temperature-first trim calibration — 2026-09-28
+
+The revised project goal is approximately **1.18 V**, with the physical resistor
+trim selected for minimum temperature drift. The [published result package](docs/results/trim-temperature-2026-09-28/README.md)
+contains the charts, all 14,940 selected temperature points, 45 trim-code records,
+summary, provenance, and a chart generator.
+
+- The saved 128-code DC screen covers 5 MOS × 3 BJT × 3 resistor corners,
+  typical MIM, −40/25/125 °C, 3.3/5 V AVDD, and 3.3 V DVDD.
+- Dense follow-up checks evaluated the selected code and its two neighbors
+  at 1 °C steps from −40 to 125 °C. All 135 jobs completed (44,820 DC points).
+- One code is held across both supplies and all temperatures per process
+  combination. All 14,940 selected points pass the existing self-sustaining
+  current checks.
+- Worst-of-supplies box TC: **2.54 ppm/°C typical**, **2.99 ppm/°C median**,
+  **5.28 ppm/°C worst**. Output spans **1.173776-1.189448 V**; maximum analog
+  current is **54.42 µA**. These support provisional goals of 1.18 V ±1%,
+  ≤10 ppm/°C, and ≤60 µA within this screen.
+- Code selection compares all 128 sampled candidates and uses a conservative
+  sampled-span lower bound to exclude the remaining dense candidates. Selected
+  dense sweeps agree with saved independent operating points within 0.356 µV.
+- These results do not include mismatch, intermediate/stress supplies,
+  startup/restart, trimmed-core AC/noise/stability, or extracted layout. They
+  do not resolve earlier transient simulator aborts.
+
+The source circuit and standard runner settings remain unchanged. Its 1.194 V
+voltage-calibration mode is distinct from this temperature-first analysis.
+Earlier records below retain their original scope and results.
+
+---
+
 # Corrected plots and preserved targeted reruns - 2026-09-28
 
 This update does not change any schematic, model, simulation tolerance, or

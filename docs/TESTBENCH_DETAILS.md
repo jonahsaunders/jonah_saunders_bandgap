@@ -71,6 +71,15 @@ Metrics include final reference, settling time or null when unsettled, overshoot
 
 ## TB10: Physical resistor trim and selected-code startup
 
+**Calibration goals and the default runner:** the project now targets approximately
+**1.18 V with minimum temperature drift**. The [September 28 temperature-trim results](results/trim-temperature-2026-09-28/README.md)
+use a separate all-code reanalysis and dense temperature verification, selecting
+one code across both supply endpoints and the full temperature range. The standard
+TB10 procedure below still calibrates to 1.194 V at one temperature. Changing only
+that voltage target would not reproduce temperature-first calibration. The new
+DC screen does not qualify startup at its newly selected codes.
+
+
 TB10 uses the existing **Bandgap_Core_Res.sch**, via its custom 12-pin symbol.
 It includes the real resistor segments, MOS bypass switches and body ties—not
 ideal replacements. No core dimensions or connections are changed by the runner.

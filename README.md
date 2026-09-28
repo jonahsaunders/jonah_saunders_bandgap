@@ -4,40 +4,45 @@ A GF180MCU bandgap voltage reference with a startup circuit, a seven-bit physica
 
 ## Projected post-trim specifications
 
-**Current pre-layout simulations suggest that the revised specifications below are achievable with the physical resistor-trim core.** These are conservative performance goals informed by the September 28, 2026 simulation review, not guaranteed silicon limits or a claim that every post-trim corner has passed. Final specifications will be established after the remaining trim-aware simulations and post-layout verification.
+**Current pre-layout simulations support a reference near 1.18 V with a post-trim temperature-coefficient goal of ≤10 ppm/°C.** The calibration objective is minimum temperature drift: select one physical resistor-trim code for each chip using measurements at multiple temperatures, then hold it fixed across temperature and supply. **1.18 V is the nominal voltage goal, not an exact voltage that the calibration must force.**
 
-The intended reference is **1.200 V nominal**, matching the initial proposal. Select the trim code once at **3.3 V AVDD and 25 °C**, with **3.3 V DVDD**, then hold that code fixed as supply and temperature change.
+The table distinguishes results from the physical trim core from earlier untrimmed-core measurements. Goals remain provisional until mismatch, remaining functional checks, and extracted-layout verification are complete.
 
-| Parameter | Projected goal / operating condition |
-| --- | --- |
-| Reference voltage | **1.200 V nominal** |
-| Initial accuracy after trim | **±0.25%** at the calibration condition; trim coverage under mismatch remains to be verified |
-| Accuracy across supply and temperature | **±1%** with the calibration code held fixed; provisional full-range budget |
-| Analog supply, AVDD | **3.3-5.0 V**; 3.0 V remains a characterization goal |
-| Trim logic supply, DVDD | **3.3 V** |
-| Temperature range | **−40 to 125 °C** |
-| Quiescent analog supply current | Approximately **30 µA typical**, **≤60 µA maximum**; DVDD current is characterized separately |
-| Line regulation | **≤0.1% total VREF change** across 3.3-5.0 V at fixed temperature and trim code |
-| Temperature coefficient | **≤60 ppm/°C** across −40 to 125 °C; dense post-trim sweeps remain to be verified |
-| Power-supply rejection | **≥55 dB at 1 kHz** and **≥45 dB throughout 1 Hz-1 MHz** |
-| Output noise density | **≤3,000 nV/√Hz at 1 kHz** |
-| Integrated output noise | **≤100 µV RMS over 0.1-10 Hz** |
-| Startup / restart readiness | Reach and remain within the reference tolerance **within 300 µs after the supply ramp**; unresolved transient cases remain to be verified |
-| Trim control | **7 bits / 128 codes**, calibrated once and held fixed |
+| Parameter | Projected goal / operating condition | Simulation evidence available |
+| --- | --- | --- |
+| Reference voltage | **Approximately 1.18 V nominal** | **1.18425 V** at the typical process, 25 °C / 3.3 V, after selecting the code for minimum drift |
+| Initial output accuracy | **±1% of 1.18 V** at 25 °C / 3.3 V; voltage is secondary to minimum drift | **1.17384-1.18927 V** across 45 fixed process combinations; mismatch coverage pending |
+| Output accuracy across supply and temperature | **±1% of 1.18 V**: 1.1682-1.1918 V | **1.17378-1.18945 V** across the selected dense curves at 3.3 V and 5 V; intermediate supplies and mismatch pending |
+| Analog supply, AVDD | **3.3-5.0 V**; 3.0 V remains a characterization goal | New trimmed-core temperature data covers the two nominal endpoints |
+| Trim logic supply, DVDD | **3.3 V** | Held at 3.3 V throughout the trim screen |
+| Temperature range | **−40 to 125 °C** | Verified at **1 °C steps** for the selected codes and neighboring candidates |
+| Temperature coefficient | **≤10 ppm/°C** after calibration for minimum drift | **2.54 ppm/°C typical**, **2.99 ppm/°C median**, **5.28 ppm/°C worst** across the 45 process combinations and both supplies |
+| Quiescent analog supply current | Approximately **30 µA typical**, **≤60 µA maximum**; DVDD current separate | **54.42 µA maximum** in the new selected-code temperature sweeps |
+| Line regulation | **≤0.1% total VREF change** across 3.3-5.0 V at fixed temperature and code | **0.0616%** worst in the earlier untrimmed-core nominal-supply sweeps; a complete sweep at the new trim codes remains pending |
+| Power-supply rejection | **≥55 dB at 1 kHz**, **≥45 dB throughout 1 Hz-1 MHz** | Earlier untrimmed-core minimum over the band: **47.8 dB**; trimmed-core verification pending |
+| Output noise density | **≤3,000 nV/√Hz at 1 kHz** | Earlier untrimmed-core data informed this budget; trimmed-core verification pending |
+| Integrated output noise | **≤100 µV RMS over 0.1-10 Hz** | Earlier untrimmed-core result: **52-77 µV RMS**; trimmed-core verification pending |
+| Startup / restart readiness | Enter and remain within the reference tolerance **within 300 µs after the supply ramp** | New temperature screen is DC only; startup at the selected codes and unresolved transient cases remain pending |
+| Trim control | **7 bits / 128 codes**, calibrated once and held fixed | Selected codes **65-98** in the new fixed-corner screen |
 
-The simulations supporting this projection include:
+**Additional proposal goals without supporting measurements:** load regulation **≤1%** after an output-load range is defined, and a **220 nA nominal PTAT output current** after its measurement conditions are defined.
 
-- **Physical trim:** reanalysis of the saved TB10 DC code sweeps, selecting codes for 1.200 V at 25 °C / 3.3 V, places all **135 available nominal-supply points between 1.19562 V and 1.20574 V**. Calibration error is at most **0.056%** in this subset. These points cover three temperatures, five supplies, and nine resistor/capacitor corner combinations, all with **typical MOS and BJT models**. This is a reanalysis of existing DC data, not a new transient run or full statistical qualification.
-- **Temperature:** at those reselected codes, the three-temperature voltage spans correspond to approximately **38-50 ppm/°C**. These sampled values can underestimate the full temperature coefficient; they motivate a provisional 60 ppm/°C goal rather than establish a maximum.
-- **Untrimmed baseline:** worst nominal-supply line variation is **0.0616%**, maximum current in the nominal-supply temperature sweeps is **54.4 µA**, minimum PSRR over 1 Hz-1 MHz is **47.8 dB**, and integrated noise over 0.1-10 Hz is **52-77 µV RMS**. These results support the proposed budgets, while trimmed-core PSRR and noise still require verification.
+### Temperature-trim results — September 28, 2026
 
-Trim is expected to improve initial voltage accuracy; improvement in temperature coefficient, PSRR, or noise is not assumed. Remaining checks include physical-trim mismatch coverage, dense held-code temperature sweeps, trimmed-core stability and loading, and resolution of transient simulator aborts. There are no extracted-layout or silicon results yet.
+The new screen covers **45 process combinations** (5 MOS × 3 BJT × 3 resistor, with typical MIM), **−40 to 125 °C**, **3.3 V and 5 V AVDD**, and **3.3 V DVDD**. All 128 codes were first compared at −40, 25 and 125 °C. The best sampled code and its two neighbors were then checked at 1 °C steps: **135/135 candidate jobs completed**, producing **44,820 DC sample points**. The selected code is held across both supplies and all temperatures for each process combination. All **14,940 selected-code operating points** meet the existing self-sustaining DC current checks.
 
-**Additional proposal goals not yet supported by measurements:** load regulation **≤1%** after an output-load range is defined, and a **220 nA nominal PTAT output current** after its measurement conditions are defined. These remain goals, not simulation-backed projections.
+[![Temperature drift and resulting output voltage after calibration for minimum drift](docs/results/trim-temperature-2026-09-28/temperature_drift_after_trim.png)](docs/results/trim-temperature-2026-09-28/temperature_drift_after_trim.png)
+
+The left chart shows drift relative to each curve's own 25 °C output. The right chart shows the voltage tradeoff: each dot is one process combination, with its worst temperature coefficient across the two supplies. The corner previously giving **65.5 ppm/°C** when calibrated toward 1.200 V now gives **3.28 ppm/°C** with a different code. That earlier figure used only three temperatures; the new results use the dense sweep.
+
+**These results support the revised goals; they are not a silicon guarantee or complete layout signoff.** A real chip needs calibration at multiple temperatures to select its minimum-drift code. Random mismatch, trimmed-core startup/restart, PSRR, noise, stability, and extracted-layout behavior remain to be qualified. These DC checks do not resolve the known transient simulator aborts.
+
+[Result details and method](docs/results/trim-temperature-2026-09-28/README.md) · [Selected codes and metrics (CSV)](docs/results/trim-temperature-2026-09-28/selected_codes.csv) · [Full selected temperature curves (CSV)](docs/results/trim-temperature-2026-09-28/selected_curves.csv)
+
 
 ## Current testbench acceptance targets
 
-The existing runner uses the following acceptance targets. Its trim calibration target remains **1.194 V**, while the projected specifications above use the proposal's **1.200 V** nominal reference. The projected goals do not change the testbench configuration or reclassify existing results. Trim is selected at **3.3 V and 25 °C**, then held fixed as supply and temperature change.
+The standard runner retains its existing **1.194 V** voltage-calibration criterion at **3.3 V / 25 °C** and the acceptance targets below. The revised project goal is **approximately 1.18 V with calibration for minimum temperature drift**. The published temperature-trim results come from the separate analysis linked above; updating this goal does not change the runner's settings or reclassify historical results. Simply changing its voltage target to 1.18 V would not implement minimum-drift calibration.
 
 | Parameter | Goal / operating condition |
 | --- | --- |
@@ -54,7 +59,7 @@ The existing runner uses the following acceptance targets. Its trim calibration 
 
 The full test profile also includes **3.0 V and 5.5 V stress points**, reported separately from the nominal range. The runner characterizes line regulation and output noise without enforcing the projected line-regulation and noise budgets above.
 
-**Current verification scope:** TB01-TB09 characterize the untrimmed core or its loop-probe variant. TB10 exercises the physical resistor-trim core. Full trimmed-core qualification still needs trim-aware mismatch, temperature-coefficient, PSRR, noise, and stability coverage. See [validation notes](VALIDATION.md) for the checks completed so far.
+**Current verification scope:** TB01-TB09 characterize the untrimmed core or its loop-probe variant. TB10 exercises the physical resistor-trim core. The separate temperature-trim screen above adds dense fixed-corner DC coverage at the two nominal supply endpoints. Full trimmed-core qualification still needs mismatch, broader supply coverage, startup/restart at the selected codes, PSRR, noise, and stability checks. See [validation notes](VALIDATION.md) for the checks completed so far.
 
 ## Schematics
 
@@ -203,5 +208,7 @@ The full deterministic grid uses **135 process combinations**: 5 MOS × 3 BJT ×
 [TB10_RESISTOR_TRIM.sch](TB10_RESISTOR_TRIM.sch) sweeps all **128 physical trim codes** using `Bandgap_Core_Res.sch`. At each process corner it selects a code at **3.3 V / 25 °C**, holds it across supply and temperature, and checks cold start and analog restart with DVDD powered first and held at 3.3 V.
 
 The full profile contains **405 process/temperature bundles**, covering 2,835 supply/temperature points, 362,880 code-sweep DC points, 51,840 calibration DC points, and 2,835 startup/restart transients. `trim_nominal` is the separate quick TT / 25 °C check at 3.3 V and 5 V. Full TB10 does not include trim Monte Carlo, a dense post-trim TC sweep, trimmed PSRR/noise/stability, or DVDD-loss sequencing.
+
+The [published temperature-trim analysis](docs/results/trim-temperature-2026-09-28/README.md) uses the saved all-code sweeps to choose minimum-drift codes and separately verifies their dense temperature behavior. It is not the standard runner's voltage-calibration mode.
 
 For probe connections, statistical assumptions, trim criteria, and model limitations, see the [testbench reference](docs/TESTBENCH_DETAILS.md). For recorded checks, see [VALIDATION.md](VALIDATION.md).

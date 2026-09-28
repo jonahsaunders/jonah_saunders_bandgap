@@ -1,0 +1,69 @@
+{
+  "result_date": "2026-09-28",
+  "repository_base_commit": "4b8ac068973ac236dcca2dfd1d8d31609918fad7",
+  "simulation_runs": [
+    "trim_screen_2026-09-28",
+    "trim_tc_2026-09-28"
+  ],
+  "simulator": "ngspice 46, installed IIC-OSIC-TOOLS GF180MCUD environment",
+  "source_deck_sha256": "d2e9ebfc4d9d3f3bf81b7910b2274a3e6decb16405e8e36f819afc4624f70ec8",
+  "runner_sha256": "8436c333d542c384c397385ea5ccc083b415866699f44556ae2424e96cfac472",
+  "model_entry_file_sha256": {
+    "sm141064.ngspice": "f6f4a96e18fc5ad11270ad3451aaecc7ac37fc81eb61e15b0d7d94c7bc594a24",
+    "design.ngspice": "7e222f050318388f37543a64fbd0be55cc15e4b93f57501a09f7c159c4c9e561"
+  },
+  "model_note": "Existing charge-form MIM compatibility model retained; typical MIM, statistical switches disabled. Model-entry-file hashes are not a recursive hash of all PDK includes.",
+  "axes": {
+    "mos": [
+      "typical",
+      "ff",
+      "ss",
+      "fs",
+      "sf"
+    ],
+    "bjt": [
+      "bjt_typical",
+      "bjt_ff",
+      "bjt_ss"
+    ],
+    "res": [
+      "res_typical",
+      "res_ff",
+      "res_ss"
+    ],
+    "mim": [
+      "mimcap_typical"
+    ],
+    "avdd_V": [
+      3.3,
+      5.0
+    ],
+    "dvdd_V": 3.3,
+    "temperature_C": [
+      -40,
+      125,
+      1
+    ]
+  },
+  "tc_definition": "(max(V)-min(V))/mean(V)/(125-(-40))*1e6",
+  "candidate_selection": "All 128 codes screened at -40/25/125 C; selected code and immediate neighbors verified at 1 C steps. One code per process, held across both supplies and temperature.",
+  "remaining_codes": "Excluded by invalid sampled operating point or conservative sampled-span lower bound. See selection_audit.json and README.md.",
+  "self_sustaining_limits_A": {
+    "startup_off_max": 1e-09,
+    "bias_min": 1e-08
+  },
+  "omitted": [
+    "random mismatch and statistical yield",
+    "intermediate and stress supplies",
+    "MIM corner variation",
+    "startup/restart",
+    "trimmed-core stability, PSRR, noise and loading",
+    "extracted layout and silicon"
+  ],
+  "data_sha256": {
+    "selected_curves.csv": "1b6f9e8a58a41f8259a8304ae08fb65f5f464344a7db87dfcc4b9c927eef2400",
+    "selected_codes.csv": "40f777d40f43b9c74e023e896c14db68c8ad0e27c0955d36f83371a2bcca3ebc",
+    "summary.json": "09a866e774aa79c57732c4a2341a5e3ad7ba85c9cc28bbb13b81e61a06bb404b",
+    "selection_audit.json": "422b2b43eb1f12f009eeea5b1a81ff8aef25dc5f9c5db2fd2465689072f2f709"
+  }
+}

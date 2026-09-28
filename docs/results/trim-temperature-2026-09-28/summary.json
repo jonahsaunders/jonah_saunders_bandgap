@@ -1,0 +1,24 @@
+{
+  "planned_candidate_jobs": 135,
+  "recorded_candidate_jobs": 135,
+  "complete_candidate_jobs": 135,
+  "process_corners_with_valid_selected_code": 45,
+  "elapsed_s": 31.808191946009174,
+  "tc_min_ppm_C": 0.4879376709199751,
+  "tc_max_ppm_C": 5.282365929349429,
+  "tc_median_ppm_C": 2.9941019575560373,
+  "vref_25C_3p3V_min": 1.173843859348335,
+  "vref_25C_3p3V_max": 1.189266322600764,
+  "vref_all_min": 1.17377626151599,
+  "vref_all_max": 1.189448337812012,
+  "max_difference_from_saved_op_V": 3.559170118627719e-07,
+  "nominal_goal_V": 1.18,
+  "temperature_coefficient_goal_ppm_C": 10,
+  "max_analog_current_uA": 54.42260652987662,
+  "selected_code_range": [
+    65,
+    98
+  ],
+  "selected_dense_points": 14940,
+  "silicon_qualification": false
+}
