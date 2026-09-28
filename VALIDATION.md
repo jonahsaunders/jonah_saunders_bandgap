@@ -1,3 +1,79 @@
+# Corrected plots and preserved targeted reruns - 2026-09-28
+
+This update does not change any schematic, model, simulation tolerance, or
+measurement algorithm. It adds a separate-output root and exact case selection,
+plus a source-snapshot preparation tool for reproducible focused reruns.
+
+- All 34 standard-library software checks pass. The new checks reject invalid
+  selections, verify output isolation and partial-coverage markers, and prove
+  preparation preserves source reports and refuses an existing destination.
+- All 3 plotting checks pass, including actual maximum overshoot selection and
+  bounded plot sizes/labels for a synthetic 1,600-case loop sweep.
+- The saved full TB01-TB09 reports regenerated 44 figures without errors. All
+  pages were visually reviewed. Maxima now use max, VREF uses corner envelopes,
+  TB08 separates nominal and stress supplies, and TB05 uses readable distributions
+  and limited curves that retain sampled margin extremes.
+- No electrical simulations were launched for this update. The existing TB05
+  report remains historical and does not qualify the repaired probe core.
+- The prepared rerun snapshot produced valid fresh netlists for TB03, TB05,
+  TB09 and TB10. Closing the probe cuts matched all 86 untrimmed-core statements.
+  Planning selected 65, 2,835, 458 and 405 cases/bundles respectively, all under
+  the new output root. Baseline report/PDF and schematic hashes were unchanged.
+
+The focused September 27-28 reproducer sets contain 65 TB03 and 458 TB09 cases:
+all execution failures plus nominal readiness misses with valid references.
+Offset-only misses are excluded, not resolved. Full regression remains necessary
+after circuit changes. Old reports and caches are preserved only by using a
+separate output folder; --retry-failed alone is not archival protection.
+
+# TB10 full-profile coverage - 2026-09-28
+
+The old full-suite command explicitly forced TB10 to `trim_nominal`, and the
+runner rejected other trim PVT axes. TB10 now supports the configured `full`
+and `smoke` grids; the JSON default and suite instructions select `full`.
+The existing `trim_nominal` quick check remains available.
+
+The full schedule contains 405 process/temperature bundles: 135 process
+combinations, three temperatures, and seven analog supplies per bundle.
+It plans 362,880 code-sweep DC points, 51,840 calibration DC points and
+2,835 cold-start/restart transients. A separate 25 C / 3.3 V calibration
+holds the code fixed across all V/T points for each deterministic process
+corner. Temperature bundles repeat identical calibration decks so they
+can resume independently. Nominal and stress results are reported separately.
+
+Validation used the installed GF180MCUD models and ngspice 46:
+
+- All 31 software checks pass, including full-grid counts, incomplete tables,
+  code retention across temperature, and partial-failure accounting.
+- A freshly netlisted TB10 ran the first three real full-profile bundles:
+  typical process at -40, 25 and 125 C, all seven supplies. The report explicitly
+  remains incomplete: 3 of 405 planned bundles. Repeating the same command
+  reused the three cached outcomes without turning failures into passes.
+- All 2,688 sweep DC points and 384 separate calibration points completed.
+  All three temperature bundles selected code 70 at 25 C / 3.3 V.
+  Held-code DC accuracy and self-sustaining checks passed at all 21 V/T points.
+- Of 21 startup/restart simulations, 17 completed and passed both readiness
+  checks. Four aborted during power-down with ngspice timestep-too-small
+  errors: -40 C at 3.0, 3.3 and 3.6 V; 25 C at 3.0 V. These are unresolved,
+  not passes. The runner preserves completed measurements alongside failures.
+- The independent `trim_nominal` and `smoke` entry points also completed.
+- Additional 125 C DC checks at FF/FF/FF/FF and SS/SS/SS/SS completed;
+  their room-temperature calibration codes were 71 and 73, respectively.
+- Full, nominal, and smoke plots rendered successfully. The full validation
+  CSV exported all 2,688 DC points even with the display limited to one
+  waveform bundle, and included all 34 resolved cold/restart event records.
+
+No schematic, device size, connection, physical resistor, PDK model, or
+convergence tolerance was changed by this fix. It does not resolve the
+observed power-down convergence failures or establish complete PVT signoff.
+Physical trim Monte Carlo, dense post-trim TC, trimmed PSRR/noise, additional
+DVDD sequencing and extracted-layout behavior remain outside this TB10 scope.
+
+Full terminal traces are losslessly compressed when `retain_waveforms` is
+false. Readiness and device-screen metrics use every adaptive sample;
+only the compact plotting trace is reduced to about 12,000 points.
+
+---
 # TB05 repaired-core synchronization — 2026-09-27
 
 `Bandgap_Core_LoopProbe.sch` is rebuilt from the current **untrimmed**

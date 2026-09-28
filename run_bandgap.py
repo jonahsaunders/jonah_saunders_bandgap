@@ -321,6 +321,20 @@ def _base_summarize(results,test):
     return summary
 
 
+def select_cases(planned,ids_path=None,max_cases=None):
+    selected=planned
+    if ids_path is not None:
+        ids=[line.strip() for line in Path(ids_path).read_text().splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+        if not ids or len(ids)!=len(set(ids)):
+            raise ValueError('Case selection must contain unique nonempty case IDs')
+        unknown=set(ids)-{c['case_id'] for c in planned}
+        if unknown:raise ValueError('Unknown case IDs for this test/profile: '+', '.join(sorted(unknown)[:5]))
+        wanted=set(ids)
+        selected=[c for c in planned if c['case_id'] in wanted]
+    return selected[:max_cases] if max_cases is not None else selected
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--configure',action='store_true',help='Set this folder and netlist paths in all ten schematics; no simulation')
@@ -332,6 +346,8 @@ def main():
     ap.add_argument('--list-cases',action='store_true',help='Print coverage without netlisting or simulation')
     ap.add_argument('--ngspice',default='ngspice')
     ap.add_argument('--retry-failed',action='store_true')
+    ap.add_argument('--case-ids-file',type=Path,help='Run only the case IDs in this text file (one per line); full-grid coverage remains incomplete')
+    ap.add_argument('--results-root',type=Path,help='Write under a separate results root, with the profile appended; preserves the original results')
     ap.add_argument('--max-cases',type=int,help='Debug only: report explicitly remains INCOMPLETE')
     ap.add_argument('--dc-only',action='store_true',help='TB10 only: omit selected-code startup/restart')
     args = ap.parse_args()
@@ -344,12 +360,17 @@ def main():
     if args.test is None or (args.deck is None and not args.list_cases):
         ap.error("simulation requires --deck and --test; use --configure for path setup")
     c,templates = load_config(args.config,args.test,args.profile)
+    if args.results_root is not None:
+        c['results_directory']=str(args.results_root.expanduser().resolve()/c['_profile'])
     if args.dc_only: c['trim_startup'] = False
     validate_config(c)
     if args.max_cases is not None and args.max_cases < 1: ap.error('--max-cases must be positive')
+    all_cases=list(cases(c,args.test))
+    selected=select_cases(all_cases,args.case_ids_file,args.max_cases)
     if args.list_cases:
-        planned=list(cases(c,args.test))
-        print(json.dumps({'test':args.test,'profile':c['_profile'],'planned_cases':len(planned),'first_case':planned[0],'last_case':planned[-1]},indent=2))
+        print(json.dumps({'test':args.test,'profile':c['_profile'],'planned_cases':len(all_cases),
+                         'selected_cases':len(selected),'results_directory':c['results_directory'],
+                         'first_case':selected[0],'last_case':selected[-1]},indent=2))
         return 0
     source,model_paths = prepare_source(args.deck.resolve())
     if args.test == TRIM: validate_trim_source(source)
@@ -378,8 +399,6 @@ def main():
                                 executable_bytes,dependency_bytes)
     compatible=compatible_legacy_fingerprints(source,c,templates,args.test,
                                              executable_bytes,dependency_bytes)
-    all_cases=list(cases(c,args.test))
-    selected=all_cases[:args.max_cases] if args.max_cases is not None else all_cases
     base=Path(c['results_directory']).expanduser().resolve();base.mkdir(parents=True,exist_ok=True)
     root=base/args.test;root.mkdir(exist_ok=True)
     report=base/(args.test+'_UPLOAD_THIS.txt')
@@ -394,6 +413,9 @@ def main():
             out.write(args.test+'_PVT_V2\n')
             out.write('PROFILE '+c['_profile']+'\n')
             out.write('COVERAGE '+json.dumps(c,sort_keys=True)+'\n')
+            if args.case_ids_file is not None:
+                out.write('CASE_SELECTION '+json.dumps(dict(case_ids_file=str(args.case_ids_file.resolve()),
+                                                          selected_cases=len(selected),full_grid_cases=len(all_cases)))+'\n')
             out.write('RESUME_FINGERPRINT '+fingerprint+'\n')
             out.write('TB08_GROUND_FIX_INTEGRATED_LEGACY_COMPLETED_CACHE_MIGRATION_ENABLED\n')
             out.write('MIM_CHARGE_COMPATIBILITY_MODEL_NOT_UNMODIFIED_FOUNDRY_SUBCIRCUIT\n')
@@ -419,6 +441,12 @@ def main():
                         submit_next()
             summary=summarize(results,args.test)
             summary['planned_cases']=len(all_cases)
+            summary['selected_cases']=len(selected)
+            summary['selected_cases_complete']=(len(results)==len(selected) and not summary['execution_failed_or_timed_out'])
+            summary['full_grid_complete']=(len(results)==len(all_cases) and summary['selected_cases_complete'])
+            if args.test == TRIM:
+                summary['configured_grid_complete']=(len(results)==len(all_cases) and
+                                                      not summary['execution_failed_or_timed_out'])
             out.write('SUMMARY '+json.dumps(summary,sort_keys=True)+'\n')
             if len(results)==len(all_cases):
                 out.write('END_OF_'+args.test+'_PVT_RUN\n')
@@ -427,9 +455,11 @@ def main():
                 else:
                     out.write('ALL_PLANNED_SIMULATIONS_COMPLETED_CHECK_PERFORMANCE_METRICS\n')
             else:
-                out.write('INCOMPLETE_DEBUG_LIMIT_NOT_FULL_COVERAGE\n')
+                out.write('INCOMPLETE_FULL_GRID_SELECTED_CASES_ONLY\n' if args.case_ids_file is not None
+                          else 'INCOMPLETE_DEBUG_LIMIT_NOT_FULL_COVERAGE\n')
         print('UPLOAD_THIS_FILE '+str(report),flush=True)
-    return 0 if len(results)==len(all_cases) and not summary['execution_failed_or_timed_out'] else 2
+    intended_selection=(args.case_ids_file is not None and args.max_cases is None)
+    return 0 if (len(results)==len(all_cases) or intended_selection) and summary['selected_cases_complete'] else 2
 
 
 
@@ -742,7 +772,7 @@ def configure(folder,netlist_dir):
     print('Configured ten testbenches in '+str(folder))
     print('Expected Xschem netlist directory: '+str(netlist_dir))
     print('Open canonical TBxx filenames, regenerate the netlist, then simulate.')
-    print('Per-test profiles come from bandgap_config.json; TB10 defaults to trim_nominal.')
+    print('Per-test profiles come from bandgap_config.json; full includes TB10 PVT; trim_nominal is a quick trim check.')
 
 
 # TB06-TB09 and consolidated configuration. Existing TB01-TB05 math stays above.
@@ -818,10 +848,17 @@ def validate_config(c):
 def cases(c,test):
     if test == TRIM:
         validate_trim_config(c)
-        yield dict(mos='typical',bjt='bjt_typical',res='res_typical',mim='mimcap_typical',
-                   temperature_C=25,vdd_V=None,range='nominal',case_id='TT_T25_trim_3p3V_5V',
-                   dc_operating_points=256,startup_runs=2 if c['trim_startup'] else 0,
-                   supply_voltages_V=[3.3,5.0],calibration_supply_V=3.3)
+        supplies=list(map(float,c['supply_voltages_V']))
+        for mos,bjt,res,mim,temp in itertools.product(
+                c['mos_corners'],c['bjt_corners'],c['res_corners'],c['mim_corners'],c['temperatures_C']):
+            separate_calibration=temp != 25 or supplies[0] != 3.3
+            case_id=f'{mos}_{bjt}_{res}_{mim}_T{temp:g}_trim'.replace('.','p').replace('-','m')
+            yield dict(mos=mos,bjt=bjt,res=res,mim=mim,temperature_C=temp,vdd_V=None,
+                       range='mixed' if any(trim_supply_range(v,c)=='stress' for v in supplies) else 'nominal',
+                       case_id=case_id,dc_operating_points=128*len(supplies),
+                       calibration_dc_operating_points=128 if separate_calibration else 0,
+                       startup_runs=len(supplies) if c['trim_startup'] else 0,
+                       supply_voltages_V=supplies,calibration_supply_V=3.3,calibration_temperature_C=25)
     elif test==MC:
         # Statistical libraries replace deterministic process corners. Mixing global
         # random process shifts with ff/ss is not a population-yield calculation.
@@ -1105,7 +1142,7 @@ def summarize(results,test):
 
 
 
-# TB10: nominal physical resistor trim. Uses the common reports/cache/plot pipeline.
+# TB10: physical resistor trim across PVT. Calibration is always at 25 C / 3.3 V.
 TRIM_PORTS = 'avdd avss vref b0 b1 b2 b3 b4 b5 b6 dvss dvdd'
 TRIM_IDS = ('xm7', 'xm20', 'xsupinj', 'xn1', 'xm16', 'xm18')
 TRIM_FIELDS = ['code','avdd_V','dvdd_V','vref_V','vq3_V','analog_idd_A',
@@ -1115,11 +1152,6 @@ TRIM_ERRORS = re.compile(r'error:|error on line|timestep too small|simulation(?:
 
 
 def validate_trim_config(c):
-    expected = dict(mos_corners=['typical'],bjt_corners=['bjt_typical'],
-                    res_corners=['res_typical'],mim_corners=['mimcap_typical'],
-                    temperatures_C=[25],supply_voltages_V=[3.3,5.0])
-    if any(c.get(k) != v for k,v in expected.items()):
-        raise ValueError('TB10 currently supports TT/25 C at AVDD 3.3 and 5 V only; use --profile trim_nominal')
     if c.get('trim_dvdd_V') != 3.3 or type(c.get('trim_startup')) is not bool:
         raise ValueError('TB10 requires DVDD=3.3 V and boolean trim_startup')
     for key in ['trim_transient_max_step_s','trim_tail_window_s','trim_startup_off_limit_A',
@@ -1154,6 +1186,10 @@ def validate_trim_source(source):
             raise ValueError('Missing or misconnected TB10 stimulus: '+name)
 
 
+def trim_supply_range(v,c):
+    return 'nominal' if c['nominal_supply_min_V']<=v<=c['nominal_supply_max_V'] else 'stress'
+
+
 def trim_sweep_control(c):
     output = 'trim_sweep.txt'
     TARGET = c['reference_target_V']
@@ -1161,7 +1197,7 @@ def trim_sweep_control(c):
              'set wr_singlescale', 'unset wr_vecnames', 'set appendwrite',
              'save all ' + ' '.join(f'@m.x1.{x}.m0[id]' for x in TRIM_IDS),
              'echo ' + ' '.join(TRIM_FIELDS) + f' > {output}',
-             'foreach supply 3.3 5', 'alter VDD dc = $supply',
+             'foreach supply '+' '.join(f'{v:g}' for v in c['supply_voltages_V']), 'alter VDD dc = $supply',
              'foreach code ' + ' '.join(map(str, range(128)))]
     for i in range(7):
         lines += [f'let bit_value = 3.3*(floor($code/{2**i})-2*floor($code/{2**(i+1)}))',
@@ -1210,41 +1246,53 @@ def trim_table(path,ncols):
 
 def trim_read_sweep(path,c):
     data=trim_table(path,len(TRIM_FIELDS))
-    expected={(code,v) for code in range(128) for v in (3.3,5.0)}
-    if len(data)!=256 or {(r[0],r[1]) for r in data}!=expected or any(r[2]!=3.3 for r in data):
+    expected={(code,v) for code in range(128) for v in c['supply_voltages_V']}
+    if len(data)!=len(expected) or {(r[0],r[1]) for r in data}!=expected or any(r[2]!=3.3 for r in data):
         raise ValueError('Missing, duplicated or invalid TB10 code/supply point')
     rows=[]
     for values in data:
         row=dict(zip(TRIM_FIELDS,values))
         row['code']=int(row['code'])
         row['bits_b6_to_b0']=format(row['code'],'07b')
+        row['range']=trim_supply_range(row['avdd_V'],c)
         row['self_sustaining_op']=all(abs(row[d+'_A'])<=c['trim_startup_off_limit_A'] for d in TRIM_IDS[:3]) and all(
             abs(row[d+'_A'])>c['trim_bias_min_A'] for d in TRIM_IDS[3:])
         rows.append(row)
     return sorted(rows,key=lambda r:(r['avdd_V'],r['code']))
 
 
-def trim_dc_metrics(rows,c):
+def trim_calibration_code(rows):
+    valid=[r for r in rows if r['avdd_V']==3.3 and r['self_sustaining_op']]
+    if not valid:
+        raise ValueError('No self-sustaining calibration code at 25 C / 3.3 V')
+    return min(valid,key=lambda r:(abs(r['error_mV']),r['code']))['code']
+
+
+def trim_dc_metrics(rows,c,calibration_code=None):
     summary={}
-    for v in (3.3,5.0):
+    for v in map(float,c['supply_voltages_V']):
         rr=[r for r in rows if r['avdd_V']==v]
         valid=[r for r in rr if r['self_sustaining_op']]
-        if not valid:
-            raise ValueError(f'No self-sustaining TB10 operating point at {v} V')
-        best=min(valid,key=lambda r:abs(r['error_mV']))
+        best=min(valid,key=lambda r:abs(r['error_mV'])) if valid else None
         volts=[r['vref_V'] for r in rr]
         ordered=sorted(volts)
-        summary[str(v)]=dict(best_code=best['code'],bits_b6_to_b0=best['bits_b6_to_b0'],
-                            best_vref_V=best['vref_V'],best_error_mV=best['error_mV'],
+        summary[str(v)]=dict(best_code=best['code'] if best else None,
+                            bits_b6_to_b0=best['bits_b6_to_b0'] if best else None,
+                            best_vref_V=best['vref_V'] if best else None,
+                            best_error_mV=best['error_mV'] if best else None,
                             min_vref_V=min(volts),max_vref_V=max(volts),
                             largest_sorted_gap_mV=max(b-a for a,b in zip(ordered,ordered[1:]))*1e3,
                             upward_code_steps=sum(b-a>1e-8 for a,b in zip(volts,volts[1:])),
                             self_sustaining_codes=len(valid))
-    code=summary['3.3']['best_code']
+    code=trim_calibration_code(rows) if calibration_code is None else calibration_code
+    trim_bits(code)
     held=[r for r in rows if r['code']==code]
-    return dict(dc=summary,calibration_code=code,fixed_code_results=held,startup=[],
-                fixed_code_accuracy_pass=all(abs(r['vref_V']-c['reference_target_V'])<=
-                    c['reference_target_V']*c['reference_tolerance_fraction'] for r in held))
+    for row in held:
+        row['accuracy_pass']=abs(row['vref_V']-c['reference_target_V'])<=c['reference_target_V']*c['reference_tolerance_fraction']
+    return dict(dc=summary,calibration_code=code,calibration_temperature_C=25,
+                calibration_supply_V=3.3,fixed_code_results=held,startup=[],
+                fixed_code_accuracy_pass=all(r['accuracy_pass'] for r in held),
+                fixed_code_self_sustaining_pass=all(r['self_sustaining_op'] for r in held))
 
 
 def trim_startup_metrics(path,columns,c):
@@ -1283,10 +1331,13 @@ def trim_startup_metrics(path,columns,c):
                                max_body_junction_forward_bias_V=forward,
                                gate_screen_limit_V=c['trim_gate_screen_V'],
                                above_gate_screen=max_gate>c['trim_gate_screen_V']))
-    # Compact plottable columns; the full terminal traces also remain in the attempt.
+    # Metrics above use every adaptive sample. Bound plotting data size for full
+    # PVT; lossless full terminal traces remain in the attempt (compressed if requested).
+    indices=list(range(0,len(t),max(1,math.ceil(len(t)/12000))))
+    if indices[-1]!=len(t)-1:indices.append(len(t)-1)
     wave='\n'.join(' '.join(f'{v:.15e}' for v in [
-        x,d['avdd'][i],d['dvdd'][i],d['vref'][i],max(abs(d[dev][i]) for dev in TRIM_IDS[:3])])
-        for i,x in enumerate(t))
+        t[i],d['avdd'][i],d['dvdd'][i],d['vref'][i],max(abs(d[dev][i]) for dev in TRIM_IDS[:3])])
+        for i in indices)
     return dict(events=events,trim_switch_stress=stress,rows=len(t)),wave
 
 
@@ -1321,7 +1372,10 @@ def run_trim_case(case,*,root,source,config,fingerprint,ngspice,retry_failed):
                 artifact_directory=str(attempt.relative_to(root)))
     began=time.monotonic()
     try:
-        source=source_for_case(source,case,TRIM)
+        # Every temperature bundle uses the SAME room-temperature calibration for
+        # its deterministic process corner, never the locally optimal hot/cold code.
+        nominal_source=source
+        source=source_for_case(nominal_source,case,TRIM)
         deck=attempt/'circuit.spice'
         deck.write_text(source+trim_sweep_control(config)+'.end\n')
         result['simulator_warnings']=trim_simulate(deck,config,ngspice,'TRIM_SWEEP_COMPLETE')
@@ -1329,8 +1383,18 @@ def run_trim_case(case,*,root,source,config,fingerprint,ngspice,retry_failed):
         with (attempt/'trim_sweep.csv').open('w',newline='') as f:
             writer=csv.DictWriter(f,fieldnames=list(rows[0]))
             writer.writeheader();writer.writerows(rows)
-        metrics=trim_dc_metrics(rows,config);result['metrics']=metrics
         waveform='BEGIN_TRIM_SWEEP\n'+(attempt/'trim_sweep.txt').read_text()+'END_TRIM_SWEEP\n'
+        calibration_rows=rows
+        if case['temperature_C'] != 25 or config['supply_voltages_V'][0] != 3.3:
+            folder=attempt/'calibration_T25_3p3V';folder.mkdir()
+            cal_config=dict(config,supply_voltages_V=[3.3])
+            cal_source=source_for_case(nominal_source,dict(case,temperature_C=25,vdd_V=3.3),TRIM)
+            cal_deck=folder/'circuit.spice'
+            cal_deck.write_text(cal_source+trim_sweep_control(cal_config)+'.end\n')
+            result['simulator_warnings']+=trim_simulate(cal_deck,cal_config,ngspice,'TRIM_SWEEP_COMPLETE')
+            calibration_rows=trim_read_sweep(folder/'trim_sweep.txt',cal_config)
+            waveform+='BEGIN_TRIM_CALIBRATION\n'+(folder/'trim_sweep.txt').read_text()+'END_TRIM_CALIBRATION\n'
+        metrics=trim_dc_metrics(rows,config,trim_calibration_code(calibration_rows));result['metrics']=metrics
         if config['trim_startup']:
             def job(v):
                 folder=attempt/('startup_'+str(v).replace('.','p')+'V');folder.mkdir()
@@ -1340,15 +1404,21 @@ def run_trim_case(case,*,root,source,config,fingerprint,ngspice,retry_failed):
                 try:
                     warnings=trim_simulate(deck,config,ngspice,'STARTUP_COMPLETE')
                     m,wave=trim_startup_metrics(folder/'trace.txt',cols,config)
-                    return dict(avdd_V=v,code=metrics['calibration_code'],status='COMPLETE',**m),wave,warnings
+                    if not config['retain_waveforms']:
+                        # Only replace this newly generated trace after a successful
+                        # lossless write; never remove historical attempt artifacts.
+                        with (folder/'trace.txt').open('rb') as src, gzip.open(folder/'trace.txt.gz','wb') as dst:
+                            shutil.copyfileobj(src,dst)
+                        (folder/'trace.txt').unlink()
+                    return dict(avdd_V=v,range=trim_supply_range(v,config),code=metrics['calibration_code'],status='COMPLETE',**m),wave,warnings
                 except Exception as exc:
-                    return dict(avdd_V=v,code=metrics['calibration_code'],status='UNRESOLVED',error=str(exc)),'',[]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(2,int(config['parallel_jobs']))) as pool:
-                for m,wave,warnings in pool.map(job,[3.3,5.0]):
-                    metrics['startup'].append(m)
-                    result['simulator_warnings']+=warnings
-                    name='TRIM_STARTUP_'+str(m['avdd_V']).replace('.','P')
-                    waveform+='BEGIN_'+name+'\n'+wave+'\nEND_'+name+'\n'
+                    return dict(avdd_V=v,range=trim_supply_range(v,config),code=metrics['calibration_code'],status='UNRESOLVED',error=str(exc)),'',[]
+            # Cases already run in parallel; avoid multiplying the configured jobs.
+            for m,wave,warnings in map(job,case['supply_voltages_V']):
+                metrics['startup'].append(m)
+                result['simulator_warnings']+=warnings
+                name='TRIM_STARTUP_'+str(m['avdd_V']).replace('.','P')
+                waveform+='BEGIN_'+name+'\n'+wave+'\nEND_'+name+'\n'
         metrics['startup_pass']=(all(m['status']=='COMPLETE' and all(e['status']=='PASS' for e in m['events'])
                                      for m in metrics['startup']) if config['trim_startup'] else None)
         metrics['trim_gate_screen_pass']=(all(m['status']=='COMPLETE' and not any(
@@ -1372,15 +1442,32 @@ def run_trim_case(case,*,root,source,config,fingerprint,ngspice,retry_failed):
 
 def summarize_trim(results):
     ok=[r for r in results if r['status']=='complete']
-    return dict(attempted=len(results),simulation_complete=len(ok),
+    evaluated=[r for r in results if r.get('metrics')]
+    # A failed transient must not hide a completed DC sweep or the other supplies.
+    # Bundle completion stays separate, and unresolved runs never count as passing.
+    summary=dict(attempted=len(results),simulation_complete=len(ok),
                 execution_failed_or_timed_out=len(results)-len(ok),
-                scope='TT/25 C; all 128 codes at AVDD 3.3/5 V, DVDD 3.3 V; digital-first',
-                completed_DC_points=256*len(ok),
-                calibration_codes=[r['metrics']['calibration_code'] for r in ok],
-                fixed_code_accuracy_pass_count=sum(r['metrics']['fixed_code_accuracy_pass'] for r in ok),
+                scope='Configured PVT grid; 128 codes per supply; calibration at 25 C / 3.3 V held across temperature and supply; DVDD 3.3 V, digital-first',
+                completed_DC_points=sum(r['dc_operating_points'] for r in evaluated),
+                completed_calibration_DC_points=sum(r.get('calibration_dc_operating_points',0) for r in evaluated),
+                completed_startup_runs=sum(s['status']=='COMPLETE' for r in evaluated for s in r['metrics']['startup']),
+                unresolved_startup_runs=sum(s['status']!='COMPLETE' for r in evaluated for s in r['metrics']['startup']),
+                calibration_codes=[r['metrics']['calibration_code'] for r in evaluated],
+                fixed_code_accuracy_pass_count=sum(r['metrics']['fixed_code_accuracy_pass'] for r in evaluated),
                 startup_pass_count=sum(r['metrics']['startup_pass'] is True for r in ok),
                 startup_not_run_count=sum(r['metrics']['startup_pass'] is None for r in ok),
+                qualification_limits='Fixed corners only; no trim Monte Carlo, dense TC sweep, PSRR/noise, DVDD loss, AVDD-first sequencing or extracted layout',
                 full_PVT_qualified=False)
+    for group in ('nominal','stress'):
+        held=[p for r in evaluated for p in r['metrics']['fixed_code_results'] if p['range']==group]
+        starts=[s for r in evaluated for s in r['metrics']['startup'] if s['range']==group]
+        summary[group]=dict(fixed_code_points=len(held),
+                            accuracy_pass_count=sum(p['accuracy_pass'] for p in held),
+                            self_sustaining_pass_count=sum(p['self_sustaining_op'] for p in held),
+                            startup_runs=len(starts),
+                            startup_unresolved_count=sum(s['status']!='COMPLETE' for s in starts),
+                            startup_pass_count=sum(s['status']=='COMPLETE' and all(e['status']=='PASS' for e in s['events']) for s in starts))
+    return summary
 
 # Resume compatibility for the exact previously delivered suite-v9 runner.
 # This compressed source is DATA ONLY: it is decompressed to reproduce the old

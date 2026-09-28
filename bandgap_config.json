@@ -4,7 +4,7 @@
   "default_profile": "full",
   "test_profiles": {
     "TB05_LOOP_STABILITY": "full",
-    "TB10_RESISTOR_TRIM": "trim_nominal"
+    "TB10_RESISTOR_TRIM": "full"
   },
   "defaults": {
     "mos_corners": [
