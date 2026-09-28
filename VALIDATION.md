@@ -1,3 +1,60 @@
+# TB05 repaired-core synchronization — 2026-09-27
+
+`Bandgap_Core_LoopProbe.sch` is rebuilt from the current **untrimmed**
+`Bandgap_Core.sch`, as requested. It includes the repaired startup network,
+5 V device models, dimensions, multiplicities and connections. The only
+electrical changes from that core are the intended M3/N2 gate cuts and four
+probe ports. The seven-pin symbol, TB05 wiring, injection orientation, C1
+connection, runner configuration and accuracy gate are preserved.
+
+`verify_xschem_symbols.py` now independently compares actual Xschem-generated
+core/probe netlists after closing the cuts. It checks every device statement,
+pin order, f-port isolation and C1 on MAIN e. The comparison was also shown
+to reject the previous stale probe, a shorted MAIN cut and a C1 moved to f.
+
+Validation on the installed GF180MCUD models and ngspice 46:
+
+- All 26 existing software checks pass.
+- All 40 existing Xschem netlisting/portable-symbol checks pass.
+- All 86 circuit statements match after closing the two probe cuts.
+- Ten paired DC checks compare VREF, IDD and nine internal node voltages.
+  Maximum VREF difference: 0.151421 microvolt. Maximum IDD difference:
+  0.011813 nA. Maximum internal-node difference: 1.288430 microvolt.
+- Six pairs cover all-typical corners at -40/25/125 C and 3.3/5 V.
+  Four more use MOS/BJT/resistor/MIM = ff/ff/ff/ff at 125 C/5 V,
+  ss/typical/ss/ss at -40 C/3.3 V, ff/ss/ss/ff at 125 C/5 V,
+  and ss/ss/ff/ff at 125 C/3.3 V.
+- Nine accuracy-valid points complete both conditional loop measurements.
+  The last point fails the original accuracy gate as expected; no margin is
+  accepted for it. This is a targeted update check, not the full PVT grid.
+
+| Typical 25 C | VREF | IDD | MAIN conditional phase margin |
+|---|---|---|---|
+| 3.3 V | 1.193744919 V | 24.203180 uA | 88.5703 degrees |
+| 5 V | 1.193896182 V | 31.520704 uA | 88.3117 degrees |
+
+The paired DC comparisons use reltol=1e-6, abstol=1e-14 and vntol=1e-9,
+with agreement limits of 10 microvolts and 0.1 nA. Actual loop runs retain
+the project's original analysis settings. Simulations used `ngspice -n`
+through a temporary wrapper to avoid unrelated container startup-file model
+autoloads. No user startup file, PDK model, production core or runner was
+modified. All simulations ran in temporary directories; existing results
+were preserved.
+
+BIAS has no unity crossing in these nine measurements; this does not supply
+a conventional phase margin or certify the entire coupled network. The full
+TB05 corner sweep still needs regeneration and execution on the updated
+schematic. Historical TB05 results refer to the previous probe.
+
+Source SHA-256:
+
+- Unchanged `Bandgap_Core.sch`:
+  `8495e03e2719bad0c11659aa68c36efbe879ec8743c3b4d5c628f17122432f0a`
+- Updated `Bandgap_Core_LoopProbe.sch`:
+  `ef680c0857c406c408f139c920414dea84e4ae50c06e75490b2d07bb3cfb9d42`
+
+---
+
 # Portable core-symbol validation â€” 2026-09-27
 
 All ten testbenches now locate their intended core symbol beside the open

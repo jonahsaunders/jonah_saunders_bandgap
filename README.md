@@ -402,13 +402,27 @@ imported into the new cache.
 
 ## TB05 connections preserved
 
-The seven-pin core and both injections are retained exactly as uploaded:
+The loop-probe schematic now follows the repaired, **untrimmed**
+`Bandgap_Core.sch`. It includes the current 5 V device choices, startup
+connections, and device dimensions. The seven-pin interface and both
+injections are preserved:
 
 ```spice
 x1 avdd vref 0 lg_main_e lg_main_f lg_bias_e lg_bias_f Bandgap_Core_LoopProbe
 ```
 
 MAIN e is the existing `vgn2` output with C1 attached; MAIN f goes to M3's gate. BIAS e is `vbn_i`; BIAS f goes to N2's gate. The other loop remains closed while each cut is measured. The OP acceptance gate remains 1.194 V ±0.5%. Conventional phase margin is reported only when the crossing pattern supports it. These are conditional loop measurements, not a blanket stability certificate for the coupled network.
+
+After changing `Bandgap_Core.sch`, keep the probe synchronized and run
+`python3 verify_xschem_symbols.py` in the configured Xschem environment. It
+compares the generated core and probe netlists after closing the two cuts,
+including every device parameter and connection, and rejects extra f-port
+loads or a relocated C1. The probe does not contain the resistor-trim variant.
+
+Regenerate the TB05 netlist before simulating this update. Existing TB05
+reports measured the previous probe and must not be used as results for the
+repaired core. A newly generated deck changes the runner fingerprint, so
+old cached cases will not be reused for the updated circuit.
 
 ## Plot all available results
 

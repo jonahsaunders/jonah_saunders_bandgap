@@ -34,6 +34,57 @@ def circuit_text(deck):
                      if line.strip() and not line.lstrip().startswith('*'))
 
 
+def core_statements(deck, name):
+    """Keep device parameters and connectivity, including continuation lines."""
+    deck = re.sub(r'\n\s*\+\s*', ' ', deck)
+    active = False
+    ports = None
+    body = {}
+    for line in deck.splitlines():
+        tokens = line.lower().split()
+        if not tokens or tokens[0].startswith('*'):
+            continue
+        if tokens[0] == '.subckt':
+            active = tokens[1] == name.lower()
+            if active:
+                if ports is not None:
+                    raise AssertionError(f'Duplicate subcircuit {name}')
+                ports = tokens[2:]
+        elif tokens[0] == '.ends':
+            active = False
+        elif active:
+            if tokens[0] in body:
+                raise AssertionError(f'Duplicate statement {tokens[0]} in {name}')
+            body[tokens[0]] = tokens
+    if ports is None or not body:
+        raise AssertionError(f'Missing or empty subcircuit {name}')
+    return ports, body
+
+
+def verify_loop_equivalence(core_deck, probe_deck):
+    """The two gate cuts must be the only differences from the current core."""
+    ports, core = core_statements(core_deck, 'Bandgap_Core')
+    probe_ports, probe = core_statements(probe_deck, 'Bandgap_Core_LoopProbe')
+    if ports != ['avdd', 'vref', 'avss'] or probe_ports != ports + [
+            'vgn2', 'lg_main_f', 'vbn_i', 'lg_bias_f']:
+        raise AssertionError('Core/probe port order changed')
+    for gate, device in [('lg_main_f', 'xm3'), ('lg_bias_f', 'xn2')]:
+        # An f port connected elsewhere can silently change the measured loop.
+        uses = [(name, i) for name, tokens in probe.items()
+                for i, token in enumerate(tokens) if token == gate]
+        if uses != [(device, 2)]:
+            raise AssertionError(f'{gate} must connect only to {device} gate: {uses}')
+    if 'vgn2' not in probe.get('xc1', [])[1:3]:
+        raise AssertionError('C1 must remain on MAIN e (vgn2)')
+    close = {'lg_main_f': 'vgn2', 'lg_bias_f': 'vbn_i'}
+    closed = {name: [close.get(t, t) for t in tokens] for name, tokens in probe.items()}
+    if closed != core:
+        changed = sorted(name for name in set(core) | set(closed)
+                         if core.get(name) != closed.get(name))
+        raise AssertionError('Closed loop-probe differs from Bandgap_Core: ' + ', '.join(changed))
+    return len(core)
+
+
 def netlist(project, output, cwd, test, launcher_paths=None):
     output.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
@@ -88,6 +139,9 @@ def main():
             path.write_text(text)
         expected = {test: netlist(baseline, root / 'baseline netlists', unrelated, test)
                     for test in rb.TESTS}
+        count = verify_loop_equivalence(expected['TB01_PSRR'], expected[rb.LG])
+        print(f'PASS: closed loop-probe matches all {count} core statements; '
+              'only M3/N2 gates are cut and C1 stays on MAIN e', flush=True)
 
         launcher_paths = None
         for stage in ('fresh checkout', 'moved checkout', 'configured then moved'):
