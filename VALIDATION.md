@@ -1,3 +1,31 @@
+# Corrected plots and preserved targeted reruns - 2026-09-28
+
+This update does not change any schematic, model, simulation tolerance, or
+measurement algorithm. It adds a separate-output root and exact case selection,
+plus a source-snapshot preparation tool for reproducible focused reruns.
+
+- All 34 standard-library software checks pass. The new checks reject invalid
+  selections, verify output isolation and partial-coverage markers, and prove
+  preparation preserves source reports and refuses an existing destination.
+- All 3 plotting checks pass, including actual maximum overshoot selection and
+  bounded plot sizes/labels for a synthetic 1,600-case loop sweep.
+- The saved full TB01-TB09 reports regenerated 44 figures without errors. All
+  pages were visually reviewed. Maxima now use max, VREF uses corner envelopes,
+  TB08 separates nominal and stress supplies, and TB05 uses readable distributions
+  and limited curves that retain sampled margin extremes.
+- No electrical simulations were launched for this update. The existing TB05
+  report remains historical and does not qualify the repaired probe core.
+- The prepared rerun snapshot produced valid fresh netlists for TB03, TB05,
+  TB09 and TB10. Closing the probe cuts matched all 86 untrimmed-core statements.
+  Planning selected 65, 2,835, 458 and 405 cases/bundles respectively, all under
+  the new output root. Baseline report/PDF and schematic hashes were unchanged.
+
+The focused September 27-28 reproducer sets contain 65 TB03 and 458 TB09 cases:
+all execution failures plus nominal readiness misses with valid references.
+Offset-only misses are excluded, not resolved. Full regression remains necessary
+after circuit changes. Old reports and caches are preserved only by using a
+separate output folder; --retry-failed alone is not archival protection.
+
 # TB10 full-profile coverage - 2026-09-28
 
 The old full-suite command explicitly forced TB10 to `trim_nominal`, and the

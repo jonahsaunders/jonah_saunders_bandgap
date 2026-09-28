@@ -162,6 +162,63 @@ complete run; that option intentionally produces incomplete coverage.
 
 ### 5. Find results, resume, and check failures
 
+#### Preserve the baseline and rerun selected issues
+
+After a source/runner update, use a separate results folder. For TB01-TB09,
+an incompatible cache causes the old case artifacts to be replaced, and every
+run rewrites its consolidated report. `--retry-failed` alone is **not** a backup
+or a filter for specification misses. A runner change also changes fingerprints.
+
+Prepare a frozen source snapshot and focused TB03/TB09 selections without
+starting any simulations:
+
+```bash
+python3 prepare_reruns.py --from-results results/full --to results/recheck_2026-09-28
+bash results/recheck_2026-09-28/run_selected.sh plan
+```
+
+The preparation refuses an existing destination. Once prepared, reuse its
+launcher to resume instead of preparing over it:
+
+```bash
+bash results/recheck_2026-09-28/run_selected.sh TB05
+bash results/recheck_2026-09-28/run_selected.sh TB03
+bash results/recheck_2026-09-28/run_selected.sh TB09
+# Run separately when ready for the longer held-code trim sweep:
+bash results/recheck_2026-09-28/run_selected.sh TB10
+```
+
+Run one command at a time in Bash inside FOSS. TB05 and TB10 run their complete
+configured grids. TB03/TB09 select execution failures, plus nominal readiness
+misses whose DC references were within target. They exclude offset-only misses
+and clearly report partial coverage. On the September 27-28 baseline these
+sets contain 65 TB03 and 458 TB09 cases. This is a debugging selection, not a
+substitute for regression after a circuit change.
+
+The folder contains source/config snapshots, report hashes, selected case IDs,
+new netlists, and separate per-bench plots. Changing the project later does not
+change that frozen rerun. After a circuit or test-method change, prepare another
+fresh folder to avoid mixing revisions.
+
+For manual use, the runner now accepts `--case-ids-file path.txt` (one exact case
+ID per line) and `--results-root results/new_run` (the profile is appended).
+Unknown, empty, and duplicate case selections are rejected. A completed subset
+can exit successfully, but `full_grid_complete` remains false and the report
+includes `INCOMPLETE_FULL_GRID_SELECTED_CASES_ONLY`.
+
+Replotting does not run ngspice. Preserve the original figures by selecting a
+new output folder:
+
+```bash
+python3 plot_bandgap.py --results results/full --out results/full/plots_review --max-waveforms 6
+```
+
+The revised plotter uses the maximum for worst overshoot/current, shows VREF
+corner envelopes, limits displayed loop curves while retaining margin extremes,
+and replaces thousands of per-case loop labels with distributions. All result
+records remain available in reports/CSVs. Existing TB05 results remain historical
+until the repaired untrimmed probe core is freshly netlisted and rerun.
+
 With the supplied `output_directory` setting, outputs are beside the project:
 
 | Run | Reports and case data | Figures, PDF, and CSVs |
@@ -446,7 +503,7 @@ The first command discovers all profile directories under `output_directory`. Ea
 - one combined `bandgap_plots.pdf` per profile;
 - per-bench metrics CSVs, a TB08 per-device CSV, and TB10 trim-code/startup-event CSVs.
 
-All completed-case metrics are included. To keep large sweeps readable and limit memory, detailed waveform panels display up to 24 evenly selected case traces per bench by default. This sampling is stated in the console and figure case counts. It is not a worst-case waveform selection. Use `--max-waveforms 0` to display every available trace, or raise the limit to a manageable number. Worst-case metrics still use all reported cases.
+All completed-case metrics are included. To keep large sweeps readable and limit memory, detailed waveform panels display up to 24 evenly selected case traces per bench by default. This sampling is stated in the console and figure case counts. It is not a worst-case waveform selection. Use `--max-waveforms 0` to display every available waveform trace, or raise the limit to a manageable number. TB05's Bode/Nyquist panels separately cap display at 12 curves per cut and include the smallest observed phase margins and sampled distances to -1; their distribution figures retain all accepted records. Worst-case metrics still use all reported cases.
 
 `--results /path/to/results` overrides the config's results root; it can also point directly to one profile. `--out` selects a figure destination. `--no-pdf`, `--no-csv`, and `--dpi` are available. Keep `run_bandgap.py` beside the plotter so loop reconstruction uses the same implementation as the measurements.
 
@@ -466,7 +523,7 @@ The text report contains coverage, profile, per-case metrics, simulator warnings
 
 Re-running resumes matching results. The fingerprint covers configuration, controls, the generated deck, runner, selected executable, and discovered model-file dependencies. If a simulator is selected through a wrapper, the wrapper is fingerprinted; changes to its target executable/environment are not automatically detected—disable resume after such changes. `--retry-failed` retries cached execution failures; it does not rerun valid completed cases that miss a performance target. `--max-cases` is a debug limit and produces an incomplete-coverage report.
 
-An error before scheduling may occur before a new report is created. Check the console and report fingerprint; a pre-existing report is not evidence that the attempted run started. Exit code 0 means all planned simulations executed and parsed, **not that performance passed**. Exit 2 means incomplete coverage or execution failures; configuration/preflight errors return 1. Review the actual metrics and stress/nominal labels.
+An error before scheduling may occur before a new report is created. Check the console and report fingerprint; a pre-existing report is not evidence that the attempted run started. Exit code 0 means all requested simulations executed and parsed, **not that performance passed**. With `--case-ids-file`, this can be a deliberately incomplete grid; check `full_grid_complete`. Exit 2 means execution failures or an incomplete debug-limited run; configuration/preflight errors return 1. Review the actual metrics and stress/nominal labels.
 
 ## Model provenance and validation limits
 
@@ -479,11 +536,12 @@ See `VALIDATION.md` for the software and representative local simulator checks p
 Run the integrated software checks:
 
 ```bash
-python3 -m py_compile run_bandgap.py plot_bandgap.py verify_suite.py verify_xschem_symbols.py
+python3 -m py_compile run_bandgap.py plot_bandgap.py prepare_reruns.py verify_suite.py verify_plotting.py verify_xschem_symbols.py
 python3 verify_suite.py
+python3 verify_plotting.py  # requires matplotlib and numpy
 ```
 
-The 26 checks use only the Python standard library; they do not require ngspice,
+The 34 suite checks use only the Python standard library; they do not require ngspice,
 Xschem or the PDK and are not electrical signoff. They cover the existing suite,
 all ten launchers, trim polarity/code coverage, fixed-code calibration, failure
 detection and startup readiness. Electrical and plotting checks are documented

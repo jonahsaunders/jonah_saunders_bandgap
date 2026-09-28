@@ -23,6 +23,7 @@ import json
 import math
 import re
 import sys
+import textwrap
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -154,8 +155,11 @@ def supply_colorbar(fig, axes, supplies, label='Supply (V)'):
 
 def note(ax, text):
     """A caption under an axes, for the caveats that belong with the numbers."""
-    ax.annotate(text, xy=(0, -0.19), xycoords='axes fraction', fontsize=8,
-                color=MUTED, va='top', ha='left', wrap=True)
+    width=max(38,int(ax.get_position().width*ax.figure.get_figwidth()*12))
+    offset=-110 if any(abs(t.get_rotation())>45 for t in ax.get_xticklabels()) else -52
+    ax.annotate(textwrap.fill(text,width=width), xy=(0, 0), xycoords='axes fraction',
+                xytext=(0,offset),textcoords='offset points',fontsize=8,
+                color=MUTED, va='top', ha='left', wrap=False)
 
 
 def threshold(ax, y, label, color=CRITICAL, axis='y'):
@@ -490,8 +494,9 @@ def worst_grid(cases, rowkey, colkey, get, worst):
     return grid_by(cases, rowkey, colkey, fn)
 
 
-def by_temperature(ax, cases, xkey, get, temps, marker='o'):
-    """One line per temperature over an ordered x axis, with a legend."""
+def by_temperature(ax, cases, xkey, get, temps, marker='o', reducer='min'):
+    """One explicitly reduced corner statistic per temperature and x value."""
+    if reducer not in ('min','max','range'):raise ValueError('Unknown corner reducer')
     drew = False
     for t in temps:
         pts = sorted(((c[xkey], get(c)) for c in cases
@@ -500,7 +505,12 @@ def by_temperature(ax, cases, xkey, get, temps, marker='o'):
         if not pts:
             continue
         xs = sorted({p[0] for p in pts})
-        ys = [min(v for x, v in pts if x == xv) for xv in xs]
+        lows=[min(v for x,v in pts if x==xv) for xv in xs]
+        highs=[max(v for x,v in pts if x==xv) for xv in xs]
+        ys=highs if reducer=='max' else lows
+        if reducer=='range':
+            ax.fill_between(xs,lows,highs,color=temp_color(t,temps),alpha=.12,lw=0)
+            ax.plot(xs,highs,color=temp_color(t,temps),linewidth=1.1,linestyle='--')
         ax.plot(xs, ys, marker=marker, markersize=5, color=temp_color(t, temps),
                 label='%g °C' % t)
         drew = True
@@ -587,18 +597,17 @@ def figures_tb01(test, head, cases, summary, waves):
             fig.tight_layout(); figs.append(fig)
 
         fig, axes = plt.subplots(2, 1, figsize=(8.0, 6.2), sharex=True)
-        drew = by_temperature(axes[0], ok, 'vdd_V', lambda c: c['metrics'].get('op_vref_v'), temps)
-        by_temperature(axes[1], ok, 'vdd_V', lambda c: c['metrics'].get('op_idd_ua'), temps)
+        drew = by_temperature(axes[0], ok, 'vdd_V', lambda c: c['metrics'].get('op_vref_v'), temps,reducer='range')
+        by_temperature(axes[1], ok, 'vdd_V', lambda c: c['metrics'].get('op_idd_ua'), temps,reducer='max')
         if drew:
             axes[0].axhspan(VREF_TARGET*0.995, VREF_TARGET*1.005, color=BLUE_RAMP[0],
                             alpha=0.5, zorder=0, lw=0)
             axes[0].axhline(VREF_TARGET, color=MUTED, linewidth=1.2, linestyle=(0, (5, 3)))
             axes[0].set_ylabel('VREF at operating point (V)')
-            axes[1].set_ylabel('Supply current (µA)')
+            axes[1].set_ylabel('Maximum supply current (µA)')
             axes[1].set_xlabel('Supply (V)')
             axes[0].set_title('%s — operating point across the supply sweep' % test, loc='left')
-            note(axes[1], 'Shaded band on the upper axes is 1.194 V ±0.5%. Separate axes rather '
-                          'than a second y-scale, so neither curve distorts the other.')
+            note(axes[1], 'Reference envelopes span every corner at each temperature. Current shows the maximum. Target: 1.194 V ±0.5%.')
             fig.tight_layout(); figs.append(fig)
         else:
             plt.close(fig)
@@ -735,13 +744,12 @@ def figures_tb03(test, head, cases, summary, waves):
             cb.ax.tick_params(colors=MUTED, labelsize=8)
         fig.suptitle('%s — readiness across the sweep' % test, x=0.012, ha='left',
                      fontsize=11.5, fontweight='bold', color=INK)
-        note(axes[0], 'Percentage of corner combinations at that supply/temperature that settled '
-                      'within 0.5% of the pre-shutdown reference.')
+        note(axes[0], 'Readiness includes absolute-accuracy gates and dynamic settling. Incomplete simulations are excluded from these percentages.')
         figs.append(fig)
 
         fig, axes = plt.subplots(2, 1, figsize=(8.0, 6.2), sharex=True)
-        by_temperature(axes[0], ok, 'vdd_V', lambda c: c['metrics'].get('start_peak_v'), temps)
-        by_temperature(axes[1], ok, 'vdd_V', lambda c: c['metrics'].get('restart_peak_v'), temps)
+        by_temperature(axes[0], ok, 'vdd_V', lambda c: c['metrics'].get('start_peak_v'), temps,reducer='max')
+        by_temperature(axes[1], ok, 'vdd_V', lambda c: c['metrics'].get('restart_peak_v'), temps,reducer='max')
         nominal_band(axes[0], head); nominal_band(axes[1], head)
         axes[0].set_ylabel('Peak VREF, first ramp (V)')
         axes[1].set_ylabel('Peak VREF, restart (V)')
@@ -751,15 +759,15 @@ def figures_tb03(test, head, cases, summary, waves):
         fig.tight_layout(); figs.append(fig)
 
         fig, axes = plt.subplots(2, 1, figsize=(8.0, 6.2), sharex=True)
-        by_temperature(axes[0], ok, 'vdd_V', lambda c: c['metrics'].get('final_vref_v'), temps)
-        by_temperature(axes[1], ok, 'vdd_V', lambda c: c['metrics'].get('final_idd_ua'), temps)
+        by_temperature(axes[0], ok, 'vdd_V', lambda c: c['metrics'].get('final_vref_v'), temps,reducer='range')
+        by_temperature(axes[1], ok, 'vdd_V', lambda c: c['metrics'].get('final_idd_ua'), temps,reducer='max')
         axes[0].axhspan(VREF_TARGET*0.995, VREF_TARGET*1.005, color=BLUE_RAMP[0], alpha=0.5,
                         zorder=0, lw=0)
         axes[0].axhline(VREF_TARGET, color=MUTED, linewidth=1.2, linestyle=(0, (5, 3)))
-        axes[0].set_ylabel('Settled VREF (V)'); axes[1].set_ylabel('Settled supply current (µA)')
+        axes[0].set_ylabel('Settled VREF range (V)'); axes[1].set_ylabel('Maximum settled current (µA)')
         axes[1].set_xlabel('Supply (V)')
         axes[0].set_title('%s — settled state after restart' % test, loc='left')
-        note(axes[1], 'Averaged over the last 200 µs of the 6 ms transient.')
+        note(axes[1], 'Each case is averaged over the last 200 µs. Envelopes span the corners; current is the corner maximum.')
         fig.tight_layout(); figs.append(fig)
     return figs
 
@@ -862,6 +870,20 @@ def loop_curve(text, cut):
     return values
 
 
+def select_loop_cases(cases,cut,limit=12):
+    """Bound displayed curves while including the smallest margins/distances."""
+    ordered=sorted(cases,key=lambda c:c['case_id'])
+    if len(ordered)<=limit:return ordered
+    selected={}
+    for key in ('phase_margin_deg','minimum_sampled_abs_1_plus_L'):
+        valid=[c for c in ordered if isinstance(c['metrics'].get('loops',{}).get(cut,{}).get(key),(int,float))]
+        for c in sorted(valid,key=lambda c:c['metrics']['loops'][cut][key])[:2]:selected[c['case_id']]=c
+    for i in np.linspace(0,len(ordered)-1,limit,dtype=int):
+        if len(selected)>=limit:break
+        selected.setdefault(ordered[i]['case_id'],ordered[i])
+    return list(selected.values())
+
+
 def figures_tb05(test, head, cases, summary, waves):
     figs, ok = [], complete(cases)
     if not ok:
@@ -869,7 +891,8 @@ def figures_tb05(test, head, cases, summary, waves):
 
     for cut in ('main', 'bias'):
         curves = []
-        for c in ok:
+        selected = select_loop_cases(ok,cut)
+        for c in selected:
             loop = c['metrics'].get('loops', {}).get(cut)
             if not loop:
                 continue
@@ -913,7 +936,7 @@ def figures_tb05(test, head, cases, summary, waves):
         axes[0].set_ylabel('|L| (dB)'); axes[1].set_ylabel('∠L (deg, unwrapped)')
         axes[1].set_xlabel('Frequency (Hz)')
         axes[0].set_title('%s — %s loop, %d case(s), %s'
-                          % (test, cut.upper(), len(curves), curves[0][6]), loc='left')
+                          % (test, cut.upper(), len(curves), curves[0][6])+f'\n{len(ok)} accepted cases; displayed subset includes margin extremes', loc='left')
         handles = []
         if any(l.get('phase_margin_deg') is not None for *_x, l, _s in curves):
             handles.append(Line2D([], [], color=CAT[0], label='conventional single crossing'))
@@ -938,64 +961,43 @@ def figures_tb05(test, head, cases, summary, waves):
         ax.plot([-1], [0], marker='x', markersize=11, markeredgewidth=2.5, color=CRITICAL, zorder=6)
         ax.annotate('−1', xy=(-1, 0), xytext=(6, 6), textcoords='offset points',
                     fontsize=9, color=CRITICAL)
-        ax.set_aspect('equal', adjustable='datalim')
+        ax.set_aspect('equal', adjustable='box')
         ax.set_xlabel('Re L'); ax.set_ylabel('Im L')
-        ax.set_title('%s — %s loop, Nyquist view' % (test, cut.upper()), loc='left')
-        note(ax, 'Grey circle is |L| = 1. Distance from the −1 point is the stability margin the '
-                 'phase-margin number stands in for.')
+        ax.set_xlim(-2,2);ax.set_ylim(-2,2)
+        ax.set_title('%s - %s loop, Nyquist zoom near -1' % (test, cut.upper()), loc='left')
+        note(ax, 'Grey circle is |L| = 1. Curves may leave this clipped window; the zoom alone is not a stability verdict.')
         fig.tight_layout(); figs.append(fig)
 
-    rows = []
-    for c in ok:
-        for cut in ('main', 'bias'):
-            loop = c['metrics'].get('loops', {}).get(cut)
-            if loop:
-                rows.append((c['case_id'], cut, loop))
-    if rows:
-        fig, axes = plt.subplots(1, 2, figsize=(10.6, max(3.2, 0.34*len(rows)+2.2)))
-        labels = ['%s · %s' % (cut.upper(), cid) for cid, cut, _ in rows]
-        y = np.arange(len(rows))
-        pm = [l.get('phase_margin_deg') if l.get('phase_margin_deg') is not None else float('nan')
-              for _, _, l in rows]
-        axes[0].barh(y, pm, color=CAT[0], height=0.55)
-        axes[0].set_yticks(y, labels, fontsize=8)
-        axes[0].invert_yaxis(); axes[0].yaxis.grid(False)
-        axes[0].set_xlabel('Conditional phase margin (deg)')
-        axes[0].set_title('Phase margin, where conventional', loc='left')
-        for i, v in enumerate(pm):
-            if math.isnan(v):
-                axes[0].annotate('review required', xy=(0, i), xytext=(6, 0),
-                                 textcoords='offset points', va='center', fontsize=8, color=CAT[1])
-        m1 = [l.get('minimum_sampled_abs_1_plus_L', float('nan')) for _, _, l in rows]
-        axes[1].barh(y, m1, color=CAT[2], height=0.55)
-        axes[1].set_yticks(y, ['' for _ in y])
-        axes[1].invert_yaxis(); axes[1].yaxis.grid(False)
-        axes[1].set_xlabel('min |1 + L| over the sweep')
-        axes[1].set_title('Distance from the −1 point', loc='left')
-        fig.suptitle('%s — conditional margins per case and cut' % test, x=0.012, ha='left',
-                     fontsize=11.5, fontweight='bold', color=INK)
-        note(axes[0], 'Bars are absent where the crossing pattern does not support a conventional '
-                      'phase margin; the loop status in the CSV says which case and why.')
-        fig.tight_layout(rect=(0, 0, 1, 0.94)); figs.append(fig)
+    fig, axes = plt.subplots(1, 2, figsize=(10.6, 4.8),layout='constrained')
+    for cut,col in [('main',CAT[0]),('bias',CAT[1])]:
+        loops=[c['metrics']['loops'][cut] for c in ok if cut in c['metrics'].get('loops',{})]
+        for ax,key in [(axes[0],'phase_margin_deg'),(axes[1],'minimum_sampled_abs_1_plus_L')]:
+            vals=sorted(finite([l.get(key) for l in loops]))
+            if vals:ax.step(vals,np.arange(1,len(vals)+1)*100/len(vals),where='post',color=col,
+                           label=f'{cut.upper()}: n={len(vals)}')
+        missing=sum(l.get('phase_margin_deg') is None for l in loops)
+        if missing:axes[0].plot([],[],color=col,linestyle='none',label=f'{cut.upper()}: {missing} without conventional PM')
+    axes[0].set_xlabel('Conditional phase margin (deg)')
+    axes[1].set_xlabel('Minimum sampled |1 + L|')
+    for ax in axes:
+        ax.set_ylabel('Measured cases at or below (%)');ax.set_ylim(0,105);ax.legend(fontsize=8)
+    fig.suptitle(test+' - conditional margin distributions',x=.02,ha='left',fontweight='bold')
+    note(axes[0],'All accepted cases. Missing phase margins are not zero margins. Review the loop status in the report.')
+    note(axes[1],'Sampled distance from -1; this distribution alone does not establish closed-loop stability.')
+    figs.append(fig)
 
-    fig, axes = plt.subplots(1, 2, figsize=(10.2, 4.0))
-    ids = [c['case_id'] for c in ok]
-    y = np.arange(len(ids))
-    axes[0].barh(y, [c['metrics'].get('op_vref_v', float('nan')) for c in ok], color=CAT[0], height=0.5)
-    axes[0].axvline(VREF_TARGET, color=MUTED, linewidth=1.2, linestyle=(0, (5, 3)))
-    axes[0].set_xlabel('VREF at operating point (V)')
-    axes[1].barh(y, [max(abs(c['metrics'].get('main_dc_error_v', 0)),
-                         abs(c['metrics'].get('bias_dc_error_v', 0))) for c in ok],
-                 color=CAT[2], height=0.5)
-    axes[1].set_xlabel('Worst probe DC error (V)')
-    for ax, labels in [(axes[0], ids), (axes[1], ['' for _ in ids])]:
-        ax.set_yticks(y, labels, fontsize=8); ax.invert_yaxis(); ax.yaxis.grid(False)
-    axes[0].set_title('Reference', loc='left'); axes[1].set_title('Probe continuity', loc='left')
-    fig.suptitle('%s — operating point before the injection sweeps' % test, x=0.012, ha='left',
-                 fontsize=11.5, fontweight='bold', color=INK)
-    note(axes[0], 'The runner rejects a case whose probes shift the DC solution by more than 1 nV, '
-                  'so this bar should read as zero.')
-    fig.tight_layout(rect=(0, 0, 1, 0.93)); figs.append(fig)
+    fig,axes=plt.subplots(1,2,figsize=(10.6,4.8),layout='constrained')
+    vref=[c['metrics']['op_vref_v'] for c in ok]
+    error=[max(abs(c['metrics'].get('main_dc_error_v',0)),abs(c['metrics'].get('bias_dc_error_v',0)))*1e9 for c in ok]
+    axes[0].hist(vref,bins=30,color=CAT[0],edgecolor=SURFACE)
+    axes[0].axvline(VREF_TARGET,color=MUTED,linestyle='--')
+    axes[0].set(xlabel='VREF (V)',ylabel='Accepted cases',title='Operating point')
+    axes[1].hist(error,bins=20,color=CAT[2],edgecolor=SURFACE)
+    axes[1].set(xlabel='Maximum probe DC error (nV)',ylabel='Accepted cases',title='Probe continuity')
+    fig.suptitle(test+' - operating-point checks',x=.02,ha='left',fontweight='bold')
+    note(axes[0],f'{len(ok)} accepted of {len(cases)} attempted. Rejected operating points are not evidence of oscillation.')
+    note(axes[1],'All accepted cases; probe-error gate is 1 nV. Case identifiers remain in the source report.')
+    figs.append(fig)
     return figs
 
 
@@ -1077,22 +1079,34 @@ def figures_tb08(test,head,cases,summary,waves):
         for d in c['metrics']['devices']:
             old=devs.get(d['name'])
             if old is None or d['max_abs_terminal_V']/d['screen_limit_V']>old['max_abs_terminal_V']/old['screen_limit_V']:devs[d['name']]=d
-    selected=sorted(devs.values(),key=lambda d:d['max_abs_terminal_V']/d['screen_limit_V'],reverse=True)
-    fig,bx=plt.subplots(figsize=(10,max(4.5,len(selected)*.19+1.8)),layout='constrained')
-    names=[d['name'] for d in selected];ratios=[d['max_abs_terminal_V']/d['screen_limit_V'] for d in selected]
-    bx.barh(names,ratios,color=[CRITICAL if r>1 else CAT[0] for r in ratios]);bx.invert_yaxis()
-    bx.axvline(1,color=CRITICAL,linestyle='--');bx.set(xlabel='Maximum |terminal voltage| / screening threshold',title=test+' — worst DC or startup voltage per MOS')
-    bx.text(0,-.05,'Conservative screening thresholds, not foundry reliability limits. Terminal details: device CSV.',transform=bx.transAxes,fontsize=8,color=MUTED)
+    selected=sorted(devs.values(),key=lambda d:d['max_abs_terminal_V']/d['screen_limit_V'],reverse=True)[:20]
+    names=[d['name'] for d in selected]
+    groups=[g for g in ('nominal','stress') if any(c.get('range')==g for c in ok)]
+    fig,axes=plt.subplots(1,len(groups),figsize=(11.4,6.5),sharey=True,squeeze=False,layout='constrained')
+    for bx,group in zip(axes[0],groups):
+        worst={name:0. for name in names}
+        for c in ok:
+            if c.get('range')!=group:continue
+            for d in c['metrics']['devices']:
+                if d['name'] in worst:worst[d['name']]=max(worst[d['name']],d['max_abs_terminal_V']/d['screen_limit_V'])
+        ratios=[worst[name] for name in names]
+        bx.barh(range(len(names)),ratios,color=[CRITICAL if r>1 else CAT[0] for r in ratios])
+        bx.set_yticks(range(len(names)),names,fontsize=8)
+        bx.axvline(1,color=CRITICAL,linestyle='--')
+        bx.set(xlabel='Maximum terminal voltage / screen',title=group.capitalize()+' supplies')
+        note(bx,'DC/startup maxima. Screening thresholds are not foundry reliability limits. Full device data remain in the CSV.')
+    axes[0,0].invert_yaxis()
+    fig.suptitle(test+' - device voltage screens by supply range',x=.02,ha='left',fontweight='bold')
     figs.append(fig)
     fig,ax=plt.subplots(figsize=(9,4.6),layout='constrained')
     margins={name:[] for name in devs}
     for c in ok:
         for d in c['metrics']['devices']:
             if abs(d['id'])>1e-9:margins[d['name']].append(d['saturation_margin_V'])
-    names=[n for n,vals in margins.items() if vals]
+    names=sorted((n for n,vals in margins.items() if vals),key=lambda n:min(margins[n]))[:20]
     ax.bar(range(len(names)),[min(margins[n]) for n in names],color=CAT[2]);ax.set_xticks(range(len(names)),names,rotation=90,fontsize=7)
-    ax.axhline(0,color=CRITICAL,linestyle='--');ax.set(ylabel='Minimum |VDS| − |VDSAT| (V)',title=test+' — DC saturation margin, devices with |ID| > 1 nA')
-    note(ax,'Off devices are excluded; a negative margin may be intentional in startup circuitry and requires circuit review.')
+    ax.axhline(0,color=CRITICAL,linestyle='--');ax.set(ylabel='Minimum |VDS| − |VDSAT| (V)',title=test+' - 20 lowest saturation margins (|ID| > 1 nA)')
+    note(ax,'Includes nominal and stress supplies. Off devices are excluded; negative margins may be intentional in startup circuitry.')
     figs.append(fig)
     return figs
 

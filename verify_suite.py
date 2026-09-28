@@ -8,10 +8,78 @@ import tempfile
 import unittest
 from unittest import mock
 import run_bandgap as rb
+import prepare_reruns as pr
 
 HERE=Path(__file__).resolve().parent
 
 class SuiteChecks(unittest.TestCase):
+    def test_selected_run_reports_partial_coverage_in_separate_root(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);old=root/'old';old.mkdir();sentinel=old/'baseline.txt';sentinel.write_text('keep this')
+            config=json.loads((HERE/'bandgap_config.json').read_text())
+            config['output_directory']=str(old)
+            config_path=root/'config.json';config_path.write_text(json.dumps(config))
+            c,_=rb.load_config(config_path,rb.TESTS[0],'full')
+            planned=list(rb.cases(c,rb.TESTS[0]))
+            ids=root/'cases.txt';ids.write_text(planned[0]['case_id']+'\n')
+            model=root/'models.spice'
+            model.write_text(''.join('.lib '+section+'\n' for values in rb.ALLOWED.values() for section in values))
+            executable=root/'simulator';executable.write_bytes(b'not executed')
+            def case_result(case,**kwargs):return dict(case,status='complete',resumed=False,metrics={})
+            argv=['run_bandgap.py','--test',rb.TESTS[0],'--deck',str(root/'input.spice'),
+                  '--config',str(config_path),'--profile','full','--case-ids-file',str(ids),
+                  '--results-root',str(root/'new')]
+            with mock.patch.object(rb.sys,'argv',argv),mock.patch.object(rb,'prepare_source',return_value=('',[model])), \
+                 mock.patch.object(rb,'model_dependencies',return_value=[model]), \
+                 mock.patch.object(rb.shutil,'which',return_value=str(executable)), \
+                 mock.patch.object(rb,'compatible_legacy_fingerprints',return_value=()), \
+                 mock.patch.object(rb,'run_case',side_effect=case_result), \
+                 mock.patch.object(rb,'summarize',return_value=dict(execution_failed_or_timed_out=0)), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(rb.main(),0)
+            report=(root/'new/full'/f'{rb.TESTS[0]}_UPLOAD_THIS.txt').read_text()
+            self.assertIn('INCOMPLETE_FULL_GRID_SELECTED_CASES_ONLY',report)
+            summary=json.loads(next(l[8:] for l in report.splitlines() if l.startswith('SUMMARY ')))
+            self.assertEqual(summary['planned_cases'],2835)
+            self.assertEqual(summary['selected_cases'],1)
+            self.assertTrue(summary['selected_cases_complete'])
+            self.assertFalse(summary['full_grid_complete'])
+            self.assertEqual(sentinel.read_text(),'keep this')
+            self.assertEqual(len(list(old.iterdir())),1)
+
+    def test_prepare_reruns_keeps_sources_and_refuses_existing_destination(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'old';source.mkdir();project=root/'project';project.mkdir()
+            for name in ('run_bandgap.py','plot_bandgap.py','bandgap_config.json'):
+                (project/name).write_text('original source\n')
+            rows=[dict(case_id='failed',status='failed',range='nominal'),
+                  dict(case_id='offset',status='complete',range='nominal',metrics=dict()),
+                  dict(case_id='timing',status='complete',range='nominal',metrics=dict(
+                      pre_valid=1,final_valid=1,start_ready_300us=0,restart_ready_300us=1,
+                      op_reference_in_target=True,all_events_ready=False))]
+            for test in ('TB03_STARTUP_RESTART','TB09_SUPPLY_DISTURBANCE'):
+                (source/(test+'_UPLOAD_THIS.txt')).write_text(''.join('CASE '+json.dumps(r)+'\n' for r in rows))
+            before={p.name:p.read_bytes() for p in source.iterdir()}
+            output=root/'new';counts=pr.prepare(source,output,project)
+            self.assertEqual(set(counts.values()),{2})
+            self.assertEqual(before,{p.name:p.read_bytes() for p in source.iterdir()})
+            self.assertEqual((output/'selections/TB03_STARTUP_RESTART.txt').read_text(),'failed\ntiming\n')
+            with self.assertRaisesRegex(ValueError,'already exists'):pr.prepare(source,output,project)
+            self.assertIn('--results-root "$ROOT"',(output/'run_selected.sh').read_text())
+
+    def test_explicit_case_selection(self):
+        planned=[dict(case_id=k) for k in ('a','b','c')]
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'selection.txt'
+            path.write_text('# known failures\nc\na\n')
+            self.assertEqual([r['case_id'] for r in rb.select_cases(planned,path)],['a','c'])
+            self.assertEqual(rb.select_cases(planned,path,1),[planned[0]])
+            for bad in ('a\na\n','missing\n','# empty\n'):
+                path.write_text(bad)
+                with self.assertRaises(ValueError):rb.select_cases(planned,path)
+
     def config(self,test=rb.POWER,profile='smoke'):
         return rb.load_config(HERE/'bandgap_config.json',test,profile)[0]
 

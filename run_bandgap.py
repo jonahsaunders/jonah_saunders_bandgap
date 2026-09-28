@@ -321,6 +321,20 @@ def _base_summarize(results,test):
     return summary
 
 
+def select_cases(planned,ids_path=None,max_cases=None):
+    selected=planned
+    if ids_path is not None:
+        ids=[line.strip() for line in Path(ids_path).read_text().splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+        if not ids or len(ids)!=len(set(ids)):
+            raise ValueError('Case selection must contain unique nonempty case IDs')
+        unknown=set(ids)-{c['case_id'] for c in planned}
+        if unknown:raise ValueError('Unknown case IDs for this test/profile: '+', '.join(sorted(unknown)[:5]))
+        wanted=set(ids)
+        selected=[c for c in planned if c['case_id'] in wanted]
+    return selected[:max_cases] if max_cases is not None else selected
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--configure',action='store_true',help='Set this folder and netlist paths in all ten schematics; no simulation')
@@ -332,6 +346,8 @@ def main():
     ap.add_argument('--list-cases',action='store_true',help='Print coverage without netlisting or simulation')
     ap.add_argument('--ngspice',default='ngspice')
     ap.add_argument('--retry-failed',action='store_true')
+    ap.add_argument('--case-ids-file',type=Path,help='Run only the case IDs in this text file (one per line); full-grid coverage remains incomplete')
+    ap.add_argument('--results-root',type=Path,help='Write under a separate results root, with the profile appended; preserves the original results')
     ap.add_argument('--max-cases',type=int,help='Debug only: report explicitly remains INCOMPLETE')
     ap.add_argument('--dc-only',action='store_true',help='TB10 only: omit selected-code startup/restart')
     args = ap.parse_args()
@@ -344,12 +360,17 @@ def main():
     if args.test is None or (args.deck is None and not args.list_cases):
         ap.error("simulation requires --deck and --test; use --configure for path setup")
     c,templates = load_config(args.config,args.test,args.profile)
+    if args.results_root is not None:
+        c['results_directory']=str(args.results_root.expanduser().resolve()/c['_profile'])
     if args.dc_only: c['trim_startup'] = False
     validate_config(c)
     if args.max_cases is not None and args.max_cases < 1: ap.error('--max-cases must be positive')
+    all_cases=list(cases(c,args.test))
+    selected=select_cases(all_cases,args.case_ids_file,args.max_cases)
     if args.list_cases:
-        planned=list(cases(c,args.test))
-        print(json.dumps({'test':args.test,'profile':c['_profile'],'planned_cases':len(planned),'first_case':planned[0],'last_case':planned[-1]},indent=2))
+        print(json.dumps({'test':args.test,'profile':c['_profile'],'planned_cases':len(all_cases),
+                         'selected_cases':len(selected),'results_directory':c['results_directory'],
+                         'first_case':selected[0],'last_case':selected[-1]},indent=2))
         return 0
     source,model_paths = prepare_source(args.deck.resolve())
     if args.test == TRIM: validate_trim_source(source)
@@ -378,8 +399,6 @@ def main():
                                 executable_bytes,dependency_bytes)
     compatible=compatible_legacy_fingerprints(source,c,templates,args.test,
                                              executable_bytes,dependency_bytes)
-    all_cases=list(cases(c,args.test))
-    selected=all_cases[:args.max_cases] if args.max_cases is not None else all_cases
     base=Path(c['results_directory']).expanduser().resolve();base.mkdir(parents=True,exist_ok=True)
     root=base/args.test;root.mkdir(exist_ok=True)
     report=base/(args.test+'_UPLOAD_THIS.txt')
@@ -394,6 +413,9 @@ def main():
             out.write(args.test+'_PVT_V2\n')
             out.write('PROFILE '+c['_profile']+'\n')
             out.write('COVERAGE '+json.dumps(c,sort_keys=True)+'\n')
+            if args.case_ids_file is not None:
+                out.write('CASE_SELECTION '+json.dumps(dict(case_ids_file=str(args.case_ids_file.resolve()),
+                                                          selected_cases=len(selected),full_grid_cases=len(all_cases)))+'\n')
             out.write('RESUME_FINGERPRINT '+fingerprint+'\n')
             out.write('TB08_GROUND_FIX_INTEGRATED_LEGACY_COMPLETED_CACHE_MIGRATION_ENABLED\n')
             out.write('MIM_CHARGE_COMPATIBILITY_MODEL_NOT_UNMODIFIED_FOUNDRY_SUBCIRCUIT\n')
@@ -419,6 +441,9 @@ def main():
                         submit_next()
             summary=summarize(results,args.test)
             summary['planned_cases']=len(all_cases)
+            summary['selected_cases']=len(selected)
+            summary['selected_cases_complete']=(len(results)==len(selected) and not summary['execution_failed_or_timed_out'])
+            summary['full_grid_complete']=(len(results)==len(all_cases) and summary['selected_cases_complete'])
             if args.test == TRIM:
                 summary['configured_grid_complete']=(len(results)==len(all_cases) and
                                                       not summary['execution_failed_or_timed_out'])
@@ -430,9 +455,11 @@ def main():
                 else:
                     out.write('ALL_PLANNED_SIMULATIONS_COMPLETED_CHECK_PERFORMANCE_METRICS\n')
             else:
-                out.write('INCOMPLETE_DEBUG_LIMIT_NOT_FULL_COVERAGE\n')
+                out.write('INCOMPLETE_FULL_GRID_SELECTED_CASES_ONLY\n' if args.case_ids_file is not None
+                          else 'INCOMPLETE_DEBUG_LIMIT_NOT_FULL_COVERAGE\n')
         print('UPLOAD_THIS_FILE '+str(report),flush=True)
-    return 0 if len(results)==len(all_cases) and not summary['execution_failed_or_timed_out'] else 2
+    intended_selection=(args.case_ids_file is not None and args.max_cases is None)
+    return 0 if (len(results)==len(all_cases) or intended_selection) and summary['selected_cases_complete'] else 2
 
 
 
