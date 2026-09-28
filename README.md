@@ -2,9 +2,42 @@
 
 A GF180MCU bandgap voltage reference with a startup circuit, a seven-bit physical resistor-trim network, and ten Xschem/ngspice testbenches.
 
-## Goal specifications
+## Projected post-trim specifications
 
-The design target is the **resistor-trim core, `Bandgap_Core_Res.sch`**, over the nominal supply and temperature ranges below. These are goals, not a claim that every target has been achieved. Trim is selected at **3.3 V and 25 °C**, then held fixed as supply and temperature change.
+**Current pre-layout simulations suggest that the revised specifications below are achievable with the physical resistor-trim core.** These are conservative performance goals informed by the September 28, 2026 simulation review, not guaranteed silicon limits or a claim that every post-trim corner has passed. Final specifications will be established after the remaining trim-aware simulations and post-layout verification.
+
+The intended reference is **1.200 V nominal**, matching the initial proposal. Select the trim code once at **3.3 V AVDD and 25 °C**, with **3.3 V DVDD**, then hold that code fixed as supply and temperature change.
+
+| Parameter | Projected goal / operating condition |
+| --- | --- |
+| Reference voltage | **1.200 V nominal** |
+| Initial accuracy after trim | **±0.25%** at the calibration condition; trim coverage under mismatch remains to be verified |
+| Accuracy across supply and temperature | **±1%** with the calibration code held fixed; provisional full-range budget |
+| Analog supply, AVDD | **3.3-5.0 V**; 3.0 V remains a characterization goal |
+| Trim logic supply, DVDD | **3.3 V** |
+| Temperature range | **−40 to 125 °C** |
+| Quiescent analog supply current | Approximately **30 µA typical**, **≤60 µA maximum**; DVDD current is characterized separately |
+| Line regulation | **≤0.1% total VREF change** across 3.3-5.0 V at fixed temperature and trim code |
+| Temperature coefficient | **≤60 ppm/°C** across −40 to 125 °C; dense post-trim sweeps remain to be verified |
+| Power-supply rejection | **≥55 dB at 1 kHz** and **≥45 dB throughout 1 Hz-1 MHz** |
+| Output noise density | **≤3,000 nV/√Hz at 1 kHz** |
+| Integrated output noise | **≤100 µV RMS over 0.1-10 Hz** |
+| Startup / restart readiness | Reach and remain within the reference tolerance **within 300 µs after the supply ramp**; unresolved transient cases remain to be verified |
+| Trim control | **7 bits / 128 codes**, calibrated once and held fixed |
+
+The simulations supporting this projection include:
+
+- **Physical trim:** reanalysis of the saved TB10 DC code sweeps, selecting codes for 1.200 V at 25 °C / 3.3 V, places all **135 available nominal-supply points between 1.19562 V and 1.20574 V**. Calibration error is at most **0.056%** in this subset. These points cover three temperatures, five supplies, and nine resistor/capacitor corner combinations, all with **typical MOS and BJT models**. This is a reanalysis of existing DC data, not a new transient run or full statistical qualification.
+- **Temperature:** at those reselected codes, the three-temperature voltage spans correspond to approximately **38-50 ppm/°C**. These sampled values can underestimate the full temperature coefficient; they motivate a provisional 60 ppm/°C goal rather than establish a maximum.
+- **Untrimmed baseline:** worst nominal-supply line variation is **0.0616%**, maximum current in the nominal-supply temperature sweeps is **54.4 µA**, minimum PSRR over 1 Hz-1 MHz is **47.8 dB**, and integrated noise over 0.1-10 Hz is **52-77 µV RMS**. These results support the proposed budgets, while trimmed-core PSRR and noise still require verification.
+
+Trim is expected to improve initial voltage accuracy; improvement in temperature coefficient, PSRR, or noise is not assumed. Remaining checks include physical-trim mismatch coverage, dense held-code temperature sweeps, trimmed-core stability and loading, and resolution of transient simulator aborts. There are no extracted-layout or silicon results yet.
+
+**Additional proposal goals not yet supported by measurements:** load regulation **≤1%** after an output-load range is defined, and a **220 nA nominal PTAT output current** after its measurement conditions are defined. These remain goals, not simulation-backed projections.
+
+## Current testbench acceptance targets
+
+The existing runner uses the following acceptance targets. Its trim calibration target remains **1.194 V**, while the projected specifications above use the proposal's **1.200 V** nominal reference. The projected goals do not change the testbench configuration or reclassify existing results. Trim is selected at **3.3 V and 25 °C**, then held fixed as supply and temperature change.
 
 | Parameter | Goal / operating condition |
 | --- | --- |
@@ -19,7 +52,7 @@ The design target is the **resistor-trim core, `Bandgap_Core_Res.sch`**, over th
 | Disturbance recovery | Return to the reference tolerance **within 300 µs**, staying in range through the 2 ms observation window |
 | Trim control | **7 bits / 128 codes**; `b0` is the LSB; logic 1 bypasses a resistor segment |
 
-The full test profile also includes **3.0 V and 5.5 V stress points**, reported separately from the nominal range. Line regulation and output noise are characterized; separate numerical slope and noise budgets have not been assigned.
+The full test profile also includes **3.0 V and 5.5 V stress points**, reported separately from the nominal range. The runner characterizes line regulation and output noise without enforcing the projected line-regulation and noise budgets above.
 
 **Current verification scope:** TB01-TB09 characterize the untrimmed core or its loop-probe variant. TB10 exercises the physical resistor-trim core. Full trimmed-core qualification still needs trim-aware mismatch, temperature-coefficient, PSRR, noise, and stability coverage. See [validation notes](VALIDATION.md) for the checks completed so far.
 
