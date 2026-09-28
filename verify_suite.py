@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 import run_bandgap as rb
 
 HERE=Path(__file__).resolve().parent
@@ -91,7 +92,7 @@ class SuiteChecks(unittest.TestCase):
 
 
     def trim_config(self):
-        return rb.load_config(HERE/'bandgap_config.json',rb.TRIM)[0]
+        return rb.load_config(HERE/'bandgap_config.json',rb.TRIM,'trim_nominal')[0]
 
     def trim_rows(self):
         return [[code,v,3.3,1.194,.708,25e-6,1e-10,0,0,0,0,1e-7,1e-6,1e-6]
@@ -113,10 +114,99 @@ class SuiteChecks(unittest.TestCase):
         c['trim_startup']=False
         self.assertEqual(next(rb.cases(c,rb.TRIM))['startup_runs'],0)
 
-    def test_trim_does_not_claim_full_pvt(self):
+    def test_trim_full_grid_and_default(self):
         c,_=rb.load_config(HERE/'bandgap_config.json',rb.TRIM,'full')
-        with self.assertRaisesRegex(ValueError,'TT/25'):
-            rb.validate_config(c)
+        rb.validate_config(c)
+        cs=list(rb.cases(c,rb.TRIM))
+        self.assertEqual(len(cs),405)
+        self.assertEqual(len({x['case_id'] for x in cs}),405)
+        self.assertEqual(sum(x['dc_operating_points'] for x in cs),362880)
+        self.assertEqual(sum(x['calibration_dc_operating_points'] for x in cs),51840)
+        self.assertEqual(sum(x['startup_runs'] for x in cs),2835)
+        self.assertEqual({x['temperature_C'] for x in cs},{-40,25,125})
+        self.assertTrue(all(x['calibration_temperature_C']==25 and x['calibration_supply_V']==3.3 for x in cs))
+        self.assertEqual(rb.load_config(HERE/'bandgap_config.json',rb.TRIM)[0]['_profile'],'full')
+        self.assertFalse(rb.summarize_trim([])['full_PVT_qualified'])
+
+    def test_trim_smoke_still_calibrates_at_3p3(self):
+        c=self.config(rb.TRIM,'smoke');rb.validate_config(c)
+        case=next(rb.cases(c,rb.TRIM))
+        self.assertEqual(case['supply_voltages_V'],[5.0])
+        self.assertEqual(case['calibration_dc_operating_points'],128)
+        self.assertEqual(case['startup_runs'],1)
+
+    def test_trim_full_supply_table_and_stress_groups(self):
+        c=self.config(rb.TRIM,'full')
+        rows=[dict(zip(rb.TRIM_FIELDS,r)) for r in self.trim_rows()[:128]]
+        data=[dict(r,avdd_V=v,range=rb.trim_supply_range(v,c),self_sustaining_op=True,
+                   bits_b6_to_b0=format(r['code'],'07b'))
+              for v in c['supply_voltages_V'] for r in rows]
+        m=rb.trim_dc_metrics(data,c,70)
+        self.assertEqual(len(m['fixed_code_results']),7)
+        self.assertEqual(sum(p['range']=='stress' for p in m['fixed_code_results']),2)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'sweep.txt'
+            path.write_text(' '.join(rb.TRIM_FIELDS)+'\n'+''.join(
+                ' '.join(str(r[k]) for k in rb.TRIM_FIELDS)+'\n' for r in data))
+            self.assertEqual(len(rb.trim_read_sweep(path,c)),896)
+            path.write_text(path.read_text().rsplit('\n',2)[0]+'\n')
+            with self.assertRaises(ValueError):rb.trim_read_sweep(path,c)
+
+    def test_trim_temperature_does_not_recalibrate_code(self):
+        c=self.trim_config();c.update(temperatures_C=[-40],trim_startup=False)
+        case=next(rb.cases(c,rb.TRIM))
+        source=('.lib /pdk/mos typical\n.lib /pdk/bjt bjt_typical\n.lib /pdk/res res_typical\n'
+                '.param mim_corner_2p0fF=1\n.temp 25\nVDD avdd 0 5\n')
+        decks=[]
+        def simulate(deck,config,ngspice,marker):
+            text=deck.read_text();decks.append(text)
+            optimum=70 if '.temp 25\n' in text else 100
+            rows=[]
+            for v in config['supply_voltages_V']:
+                for code in range(128):
+                    err=code-optimum
+                    rows.append([code,v,3.3,1.194+err*.001,.708,25e-6,1e-10,err,0,0,0,1e-7,1e-6,1e-6])
+            (deck.parent/'trim_sweep.txt').write_text(' '.join(rb.TRIM_FIELDS)+'\n'+
+                ''.join(' '.join(map(str,row))+'\n' for row in rows))
+            return []
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rb,'trim_simulate',side_effect=simulate):
+            result=rb.run_trim_case(case,root=Path(tmp),source=source,config=c,
+                                    fingerprint='test',ngspice='unused',retry_failed=False)
+        self.assertEqual(result['status'],'complete',result)
+        m=result['metrics']
+        self.assertEqual(m['calibration_code'],70)
+        self.assertEqual(m['dc']['3.3']['best_code'],100)
+        self.assertEqual([r['code'] for r in m['fixed_code_results']],[70,70])
+        self.assertFalse(m['fixed_code_accuracy_pass'])
+        self.assertIsNone(m['startup_pass'])
+        self.assertEqual(len(decks),2)
+        self.assertIn('.temp -40\n',decks[0]);self.assertIn('foreach supply 3.3\n',decks[1])
+
+    def test_trim_unhealthy_evaluation_point_is_not_execution_failure(self):
+        rows=self.trim_parse(self.trim_rows())
+        for row in rows:
+            if row['avdd_V']==5.:row['self_sustaining_op']=False
+        m=rb.trim_dc_metrics(rows,self.trim_config(),70)
+        self.assertIsNone(m['dc']['5.0']['best_code'])
+        self.assertTrue(m['fixed_code_accuracy_pass'])
+        self.assertFalse(m['fixed_code_self_sustaining_pass'])
+
+    def test_trim_summary_preserves_partial_data_without_passing_unresolved(self):
+        c=self.trim_config()
+        case=next(rb.cases(c,rb.TRIM))
+        m=rb.trim_dc_metrics(self.trim_parse(self.trim_rows()),c,70)
+        m.update(startup_pass=False,trim_gate_screen_pass=False,startup=[
+            dict(avdd_V=3.3,range='nominal',status='COMPLETE',events=[dict(status='PASS')]),
+            dict(avdd_V=5.,range='nominal',status='UNRESOLVED')])
+        result=dict(case,status='failed',metrics=m)
+        s=rb.summarize_trim([result])
+        self.assertEqual(s['simulation_complete'],0)
+        self.assertEqual(s['execution_failed_or_timed_out'],1)
+        self.assertEqual(s['completed_DC_points'],256)
+        self.assertEqual(s['completed_startup_runs'],1)
+        self.assertEqual(s['unresolved_startup_runs'],1)
+        self.assertEqual(s['nominal']['startup_pass_count'],1)
+        self.assertEqual(s['startup_pass_count'],0)
 
     def test_trim_timing_constraints(self):
         for key,value in [('trim_dvdd_V',5),('trim_transient_max_step_s',2e-6),

@@ -1153,19 +1153,52 @@ def figures_tb10(test,head,cases,summary,waves):
     target=config.get('reference_target_V',VREF_TARGET)
     tol=config.get('reference_tolerance_fraction',.005)
     off=config.get('trim_startup_off_limit_A',1e-9)
+    evaluated=[c for c in cases if c.get('metrics')]
+    held=[dict(p,temperature_C=c['temperature_C']) for c in evaluated
+          for p in c['metrics'].get('fixed_code_results',[])]
+    if held:
+        fig,axes=plt.subplots(1,2,figsize=(11,4.8),layout='constrained')
+        temps=sorted({p['temperature_C'] for p in held})
+        supplies=sorted({p['avdd_V'] for p in held})
+        grid=[[max([abs(p['error_mV']) for p in held if p['temperature_C']==t and p['avdd_V']==v],
+                   default=float('nan')) for v in supplies] for t in temps]
+        im=heatmap(axes[0],temps,supplies,grid,'%.2f')
+        axes[0].set(xlabel='AVDD (V)',ylabel='Temperature (C)',title='Worst held-code |error| (mV)')
+        fig.colorbar(im,ax=axes[0],fraction=.04)
+        runs=[dict(s,temperature_C=c['temperature_C']) for c in evaluated
+              for s in c['metrics'].get('startup',[])]
+        grid=[]
+        for t in temps:
+            row=[]
+            for v in supplies:
+                selected=[s for s in runs if s['temperature_C']==t and s['avdd_V']==v]
+                row.append(100*sum(s['status']=='COMPLETE' and all(e['status']=='PASS' for e in s['events']) for s in selected)/len(selected)
+                           if selected else float('nan'))
+            grid.append(row)
+        im=heatmap(axes[1],temps,supplies,grid,'%.0f')
+        axes[1].set(xlabel='AVDD (V)',ylabel='Temperature (C)',title='Cold + restart pass (% of attempted runs)')
+        fig.colorbar(im,ax=axes[1],fraction=.04)
+        fig.suptitle(f'{test} — held-code PVT coverage',x=.02,ha='left')
+        note(axes[0],'Calibration: 25 C / 3.3 V per process corner. Code held across temperature and supply.')
+        note(axes[1],'3.0/5.5 V are stress points. Unresolved runs count as non-passes; unrun points are excluded.')
+        figs.append(fig)
     for case,text in waves.values():
         data=blocks(text)
         table=np.asarray(data.get('TRIM_SWEEP',[]),dtype=float)
-        if table.shape!=(256,14) or not np.isfinite(table).all():
+        supplies=case.get('supply_voltages_V',[3.3,5.0])
+        expected={(code,v) for code in range(128) for v in supplies}
+        if (table.shape!=(len(expected),14) or not np.isfinite(table).all()
+                or {(r[0],r[1]) for r in table}!=expected):
             raise ValueError('TB10 sweep is incomplete; refusing a partial trim curve')
+        corner=f'{case["mos"]}/{case["bjt"]}/{case["res"]}/{case["mim"]}, {case["temperature_C"]:g} C'
         chosen=case['metrics']['calibration_code']
         fig,ax=plt.subplots(3,1,figsize=(10,8),sharex=True)
-        for i,supply in enumerate((3.3,5.0)):
+        for i,supply in enumerate(supplies):
             rr=table[table[:,1]==supply];rr=rr[np.argsort(rr[:,0])]
             label=f'AVDD {supply:g} V'
-            ax[0].plot(rr[:,0],rr[:,3],label=label,color=CAT[i])
-            ax[1].plot(rr[:,0],(rr[:,3]-target)*1e3,label=label,color=CAT[i])
-            ax[2].plot(rr[1:,0],-np.diff(rr[:,3])*1e3,label=label,color=CAT[i])
+            ax[0].plot(rr[:,0],rr[:,3],label=label,color=CAT[i%len(CAT)])
+            ax[1].plot(rr[:,0],(rr[:,3]-target)*1e3,label=label,color=CAT[i%len(CAT)])
+            ax[2].plot(rr[1:,0],-np.diff(rr[:,3])*1e3,label=label,color=CAT[i%len(CAT)])
         ax[0].axhspan(target*(1-tol),target*(1+tol),color=GOOD,alpha=.1)
         ax[0].axhline(target,color=INK2,ls='--',lw=.8)
         ax[1].axhline(0,color=INK2,ls='--',lw=.8)
@@ -1173,14 +1206,14 @@ def figures_tb10(test,head,cases,summary,waves):
         ax[0].set_ylabel('VREF (V)');ax[1].set_ylabel('Target error (mV)')
         ax[2].set_ylabel('Previous minus next (mV)')
         ax[2].set_xlabel('Trim code (b6 ... b0); 1 bypasses the physical resistor')
-        ax[0].set_title(f'{test} — trim sweep, TT / 25 C / DVDD 3.3 V',loc='left')
+        ax[0].set_title(f'{test} — trim sweep\n{corner}; DVDD 3.3 V',loc='left')
         for a in ax:
             a.axvline(chosen,color=MUTED,ls=':',lw=1)
             a.legend(fontsize=8)
-        note(ax[2],f'Code {chosen} ({chosen:07b}) selected only at 3.3 V and held at 5 V. Negative steps are nonmonotonic.')
+        note(ax[2],f'Code {chosen} ({chosen:07b}) selected at 25 C / 3.3 V and held throughout. Negative steps are nonmonotonic.')
         fig.tight_layout();figs.append(fig)
         starts=[(supply,np.asarray(data.get('TRIM_STARTUP_'+str(supply).replace('.','P'),[]),dtype=float))
-                for supply in (3.3,5.0)]
+                for supply in supplies]
         starts=[(v,a) for v,a in starts if len(a)]
         if starts:
             fig,ax=plt.subplots(3,1,figsize=(10,8),sharex=True)
@@ -1188,24 +1221,24 @@ def figures_tb10(test,head,cases,summary,waves):
                 if a.ndim!=2 or a.shape[1]!=5 or a[-1,0]<.006-1e-10:
                     raise ValueError('Incomplete TB10 startup trace')
                 tt=a[:,0]*1e3
-                ax[0].plot(tt,a[:,1],label=f'AVDD {supply:g} V',color=CAT[i])
-                ax[1].plot(tt,a[:,3],label=f'AVDD {supply:g} V',color=CAT[i])
-                ax[2].semilogy(tt,np.maximum(a[:,4],1e-18),label=f'AVDD {supply:g} V',color=CAT[i])
+                ax[0].plot(tt,a[:,1],label=f'AVDD {supply:g} V',color=CAT[i%len(CAT)])
+                ax[1].plot(tt,a[:,3],label=f'AVDD {supply:g} V',color=CAT[i%len(CAT)])
+                ax[2].semilogy(tt,np.maximum(a[:,4],1e-18),label=f'AVDD {supply:g} V',color=CAT[i%len(CAT)])
             ax[0].plot(starts[0][1][:,0]*1e3,starts[0][1][:,2],ls='--',color=INK2,label='DVDD 3.3 V')
             ax[1].axhspan(target*(1-tol),target*(1+tol),color=GOOD,alpha=.15)
             ax[1].axhline(target,color=INK2,ls='--',lw=.7)
             ax[2].axhline(off,color=CRITICAL,ls='--',lw=.7,label='Assist-off threshold')
             ax[0].set_ylabel('Supply (V)');ax[1].set_ylabel('VREF (V)')
             ax[2].set_ylabel('Max startup-aid |I| (A)');ax[2].set_xlabel('Time (ms)')
-            ax[0].set_title(f'{test} — startup/restart, fixed code {chosen}',loc='left')
+            ax[0].set_title(f'{test} — startup/restart, fixed code {chosen}\n{corner}',loc='left')
             for a in ax:a.legend(fontsize=8)
-            note(ax[2],'DVDD rises first and stays on. These nominal events do not qualify DVDD loss or AVDD-first power-up.')
+            note(ax[2],'DVDD rises first and stays on. These events do not qualify DVDD loss or AVDD-first power-up.')
             fig.tight_layout();figs.append(fig)
         events=[(m['avdd_V'],e) for m in case['metrics'].get('startup',[])
                 if m['status']=='COMPLETE' for e in m['events']]
         if events:
             fig,ax=plt.subplots(figsize=(9,4))
-            names=[f'{v:g} V {e["event"]}' for v,e in events]
+            names=[f'{v:g} V\n{e["event"]}' for v,e in events]
             values=[e['settle_after_ramp_us'] or 0 for _,e in events]
             colors=[GOOD if e['status']=='PASS' else CRITICAL for _,e in events]
             bars=ax.bar(names,values,color=colors,width=.65)
@@ -1217,24 +1250,34 @@ def figures_tb10(test,head,cases,summary,waves):
                             textcoords='offset points',ha='center',fontsize=8)
             ax.set_ylim(0,max([limit]+values)*1.25)
             ax.set_ylabel('Settling after AVDD ramp (us)');ax.legend()
-            ax.set_title(f'{test} — selected-code readiness',loc='left')
+            ax.set_title(f'{test} — selected-code readiness\n{corner}',loc='left')
             note(ax,'Readiness requires the reference band, assistance off, and live bias branches to remain valid.')
             fig.tight_layout();figs.append(fig)
     return figs
 
 
-def write_trim_csv(out,test,cases,waves):
+def write_trim_csv(out,test,cases,waves,root=None):
     fields=['code','avdd_V','dvdd_V','vref_V','vq3_V','analog_idd_A','digital_idd_A',
             'error_mV','xm7_A','xm20_A','xsupinj_A','xn1_A','xm16_A','xm18_A']
     with (out/(test+'_trim_codes.csv')).open('w',newline='') as f:
-        writer=csv.writer(f);writer.writerow(['case_id']+fields)
-        for case,text in waves.values():
-            for row in blocks(text).get('TRIM_SWEEP',[]):writer.writerow([case['case_id']]+row)
+        writer=csv.writer(f);writer.writerow(['case_id','temperature_C']+fields)
+        # Export all completed DC points, independent of the displayed trace limit.
+        for case in (c for c in cases if c.get('metrics')):
+            path=(root/test/case['artifact_directory']/'trim_sweep.csv'
+                  if root is not None and case.get('artifact_directory') else None)
+            if path is not None and path.is_file():
+                with path.open() as source:
+                    for row in csv.DictReader(source):
+                        writer.writerow([case['case_id'],case['temperature_C']]+[row[k] for k in fields])
+            elif case['case_id'] in waves:
+                for row in blocks(waves[case['case_id']][1]).get('TRIM_SWEEP',[]):
+                    writer.writerow([case['case_id'],case['temperature_C']]+row)
     events=[]
-    for case in complete(cases):
+    for case in (c for c in cases if c.get('metrics')):
         for run in case['metrics'].get('startup',[]):
             for event in run.get('events',[]):
-                events.append(dict(case_id=case['case_id'],avdd_V=run['avdd_V'],
+                events.append(dict(case_id=case['case_id'],temperature_C=case['temperature_C'],avdd_V=run['avdd_V'],
+                                   range=run.get('range','nominal'),
                                    code=run['code'],**event))
     if events:
         fields=list(events[0])
@@ -1352,7 +1395,7 @@ def main():
         if not args.no_csv:
             written = write_csv(out/(test+'_metrics.csv'), cases)
             if test=='TB08_POWER_DEVICE_LIMITS': write_device_csv(out/(test+'_devices.csv'),cases)
-            if test=='TB10_RESISTOR_TRIM': write_trim_csv(out,test,cases,waves)
+            if test=='TB10_RESISTOR_TRIM': write_trim_csv(out,test,cases,waves,root)
             if written:
                 print('%-22s   %s' % ('', written.name))
         figs = [status_figure(test, cases, summary, head)]

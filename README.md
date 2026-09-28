@@ -10,8 +10,8 @@ This branch contains the cleaned startup-repaired core and the physical resistor
 
 Start with one **smoke** run to check your setup, then run the full suite below.
 There are ten independent testbenches: clicking **Simulate** in one schematic
-runs only that bench. TB01–TB09 support `smoke` and `full`; TB10 uses
-`trim_nominal` and must not be included in a `--profile full` sweep.
+runs only that bench. All ten benches support `smoke` and `full`. TB10 also
+supports `trim_nominal` for a quick TT / 25 C check at 3.3 V and 5 V.
 
 ### 1. Open the correct environment and get the project
 
@@ -106,11 +106,10 @@ the performance metrics before starting the full sweep.
 
 **Using the Xschem window:** launch `xschem TB01_PSRR.sch` from this configured
 terminal, then click **Netlist** and **Simulate**. This follows the profiles in
-`bandgap_config.json`: TB01–TB09 default to `full`, while TB10 defaults to
-`trim_nominal`. For GUI smoke runs, set `default_profile` to `smoke` and
-`test_profiles.TB05_LOOP_STABILITY` to `smoke`; keep
-`test_profiles.TB10_RESISTOR_TRIM` at `trim_nominal`. Restore the first two
-settings to `full` when ready. The terminal's explicit `--profile smoke`
+`bandgap_config.json`: all ten benches default to `full`. For GUI smoke runs,
+set `default_profile`, `test_profiles.TB05_LOOP_STABILITY`, and
+`test_profiles.TB10_RESISTOR_TRIM` to `smoke`. Restore all three settings
+to `full` when ready. The terminal's explicit `--profile smoke`
 does not change the GUI defaults.
 
 ### 4. Run all ten testbenches
@@ -138,10 +137,6 @@ individual simulation runner fails, printing that bench's name.
   for sch in TB[0-9][0-9]_*.sch; do
     bench="${sch%.sch}"
     profile="$SUITE_PROFILE"
-    if [ "$bench" = "TB10_RESISTOR_TRIM" ]; then
-      profile=trim_nominal
-    fi
-
     python3 run_bandgap.py --test "$bench" \
       --deck "$NETLIST_DIR/$bench.spice" \
       --profile "$profile" --retry-failed || {
@@ -156,11 +151,11 @@ individual simulation runner fails, printing that bench's name.
 ```
 
 For a quick check of every bench first, change `SUITE_PROFILE=full` to
-`SUITE_PROFILE=smoke`. TB10 still runs its nominal trim bundle, including the
-code sweep and selected-code startup/restart; it has no separate smoke profile.
+`SUITE_PROFILE=smoke`. TB10 then checks TT / 25 C / 5 V, with a separate
+3.3 V calibration sweep and selected-code startup/restart at 5 V.
 
 The full sweep contains tens of thousands of cases and can take substantial
-time, especially TB03 and TB09. Benches run sequentially above; each runner uses
+time, especially TB03, TB09, and TB10. Benches run sequentially above; each runner uses
 `parallel_jobs` from the JSON (two by default for `full`). Keep the terminal and
 container running until the suite finishes. Do not use `--max-cases` for a
 complete run; that option intentionally produces incomplete coverage.
@@ -171,9 +166,9 @@ With the supplied `output_directory` setting, outputs are beside the project:
 
 | Run | Reports and case data | Figures, PDF, and CSVs |
 |---|---|---|
-| TB01–TB09 full | `results/full/` | `results/full/plots/` |
-| TB01–TB09 smoke | `results/smoke/` | `results/smoke/plots/` |
-| TB10 trim | `results/trim_nominal/` | `results/trim_nominal/plots/` |
+| TB01–TB10 full | `results/full/` | `results/full/plots/` |
+| TB01–TB10 smoke | `results/smoke/` | `results/smoke/plots/` |
+| TB10 quick nominal trim | `results/trim_nominal/` | `results/trim_nominal/plots/` |
 
 Each bench produces `TBxx_NAME_UPLOAD_THIS.txt`. The plot folders contain
 `bandgap_plots.pdf`, PNG figures, and metrics CSVs. You can regenerate plots at
@@ -195,7 +190,7 @@ Common setup problems:
 | Missing model file | Correct the paths in each bench's `MODELS` block, then regenerate its netlist. |
 | Python runner or `.spice` file not found from **Simulate** | Close the bench, rerun `--configure` with the actual Xschem netlist directory, reopen, and click **Netlist** again. |
 | `No module named fcntl` | Run inside Linux/FOSS rather than native Windows Python. |
-| TB10 rejects the selected profile | Use `--profile trim_nominal`; TB10 is a nominal trim test, not a full PVT qualification. |
+| TB10 still selects `trim_nominal` during a full run | Update the runner and JSON, and use the updated suite block above; older blocks forcibly overrode TB10 to `trim_nominal`. |
 
 For the per-bench measurements and case counts, see [Test coverage](#test-coverage).
 For cache/report details, see [Results, resume, and what to upload](#results-resume-and-what-to-upload).
@@ -231,13 +226,13 @@ Keep these project files together: the schematic launchers and Python imports de
 - `defaults`: PVT axes, simulator settings, and shared measurement settings.
 - `profiles`: `full`, `smoke`, `loop_smoke`, and `trim_nominal` overrides.
 - `default_profile`: `full`.
-- `test_profiles`: TB05 selects `full`; TB10 selects `trim_nominal`. Set TB05 to `loop_smoke` for a nominal loop check or `smoke` for the shared smoke profile.
+- `test_profiles`: TB05 and TB10 select `full`. Set TB05 to `loop_smoke` for a nominal loop check; set TB10 to `trim_nominal` for the two-supply nominal trim check.
 - `test_overrides`: settings by full test name, including TB10's fixed DVDD, transient step, assistance/bias limits and optional startup.
 - `controls`: the existing TB01–TB03 ngspice control templates, now embedded in this file. TB04–TB10 controls are generated in Python and their template slots are empty strings.
 
 Settings apply in this order: defaults → per-test overrides → selected profile. A command-line `--profile` overrides the default/per-test profile selection. Full and smoke results live in separate subdirectories, so they cannot overwrite each other.
 
-For example, change the `test_profiles` entry to `"TB05_LOOP_STABILITY": "loop_smoke"` to make the GUI run a nominal TB05 check. `--configure` preserves the JSON selection. To make TB01–TB09 GUI runs quick smoke tests, set `default_profile` to `smoke` and TB05's entry to `smoke` too; leave TB10's entry at `trim_nominal`.
+For example, change the `test_profiles` entry to `"TB05_LOOP_STABILITY": "loop_smoke"` to make the GUI run a nominal TB05 check. `--configure` preserves the JSON selection. To make all GUI runs quick smoke tests, set `default_profile` and both TB05/TB10 entries to `smoke`.
 
 An earlier `validation.json`, referenced in the historical validation notes, described past verification; it is not runtime configuration and is not included here. That history is documented in `VALIDATION.md`. Only one JSON file is shipped. Generated per-case `result.json` caches remain simulation **outputs**, not additional configuration files.
 
@@ -258,11 +253,11 @@ For TB01–TB09, the full fixed-corner grid is **5 MOS × 3 BJT × 3 resistor ×
 | TB07_NOISE | Output noise spectrum and band-integrated RMS noise | 2,835 | 1 |
 | TB08_POWER_DEVICE_LIMITS | Quiescent current/power; DC/startup MOS voltage screens | 2,835 | 1 |
 | TB09_SUPPLY_DISTURBANCE | Ramps, brownouts, repeated cycles, supply steps | 33,210 | 5 |
-| TB10_RESISTOR_TRIM | Physical trim sweep + held-code startup/restart | Use `trim_nominal` | Use `trim_nominal` |
+| TB10_RESISTOR_TRIM | Physical trim sweep + held-code startup/restart | 405 bundles / 2,835 V/T points | 1 bundle / 1 V/T point |
 
-TB10's `trim_nominal` profile schedules one calibration bundle: 256 DC operating points plus two startup/restart transients. It rejects other PVT axes instead of silently treating them as nominal.
+TB10 full includes 135 process combinations, three temperatures, and seven analog supplies: 362,880 code-sweep DC points, 51,840 additional calibration DC points, and 2,835 startup/restart transients. Each process corner is calibrated at 25 C / 3.3 V, then that same code is held across temperature and supply. Independent temperature bundles repeat the same deterministic calibration so each can resume separately. `trim_nominal` remains one bundle with 256 DC points and two transients. Completion of these fixed-corner checks is not trim Monte Carlo or full electrical signoff.
 
-Full coverage can take substantial time, especially TB03/TB09. Inspect the schedule without a simulator/netlist:
+Full coverage can take substantial time, especially TB03/TB09/TB10. Inspect the schedule without a simulator/netlist:
 
 ```bash
 python3 run_bandgap.py --test TB09_SUPPLY_DISTURBANCE --profile full --list-cases
@@ -282,7 +277,7 @@ The full profile runs 100 deterministic seeds per mode at all 21 V/T points: 6,3
 
 Statistical global variation replaces the fixed ff/ss/fs/sf grid. Combining those shifts with deterministic extreme process corners would not represent ordinary population yield. Deterministic corner coverage is supplied by the other benches. The original MIM compatibility model remains nominal in this **DC-only** test; MIM random variation is not exercised. Device mismatch coverage is whatever the installed PDK statistical models implement.
 
-The output correction is `1.194 V − simulated VREF`, reported in mV. **TB06 still uses the untrimmed `Bandgap_Core`; it does not exercise the separate physical trim network.** TB10 exercises `Bandgap_Core_Res` nominally, but does not add trim yield qualification to TB06. This quantity helps estimate the correction range needed; it does not demonstrate realizable trim resolution, post-trim TC, or trim yield. MC startup/PSRR/noise and statistical layout effects are outside TB06's current scope. Histograms use one V/T point; they do not pool PVT points into a misleading yield histogram.
+The output correction is `1.194 V − simulated VREF`, reported in mV. **TB06 still uses the untrimmed `Bandgap_Core`; it does not exercise the separate physical trim network.** TB10 exercises `Bandgap_Core_Res` over configured fixed corners, but does not add trim yield qualification to TB06. This quantity helps estimate the correction range needed; it does not demonstrate realizable trim resolution, post-trim TC, or trim yield. MC startup/PSRR/noise and statistical layout effects are outside TB06's current scope. Histograms use one V/T point; they do not pool PVT points into a misleading yield histogram.
 
 ## TB07: noise
 
@@ -327,25 +322,30 @@ the other benches. Alternatively, run the freshly generated netlist directly:
 
 ```bash
 python3 run_bandgap.py --test TB10_RESISTOR_TRIM \
-  --deck /headless/.xschem/simulations/TB10_RESISTOR_TRIM.spice
-python3 plot_bandgap.py --test TB10_RESISTOR_TRIM --profile trim_nominal
+  --deck /headless/.xschem/simulations/TB10_RESISTOR_TRIM.spice \
+  --profile full --retry-failed
+python3 plot_bandgap.py --test TB10_RESISTOR_TRIM --profile full
 ```
 
-Use your actual netlist path. The default profile is `trim_nominal`;
-`--profile full` and `--profile smoke` are not TB10 corner qualifications.
+Use your actual netlist path. The default profile is `full`. Use
+`--profile trim_nominal` for the earlier TT / 25 C, two-supply quick check,
+or `--profile smoke` for the shared TT / 25 C / 5 V check.
+You can run TB10 alone after an older all-bench run; TB01–TB09 do not need
+to run again just to fill the missing trim coverage.
 Preview the schedule without a simulator:
 
 ```bash
-python3 run_bandgap.py --test TB10_RESISTOR_TRIM --list-cases
+python3 run_bandgap.py --test TB10_RESISTOR_TRIM --profile full --list-cases
 ```
 
 The bundle:
 
-1. Sweeps every code 0–127 at AVDD = 3.3 V and 5 V, TT / 25 C.
+1. Sweeps every code 0–127 at each configured process, temperature and AVDD.
 2. Keeps DVDD and logic-high at 3.3 V; connects AVSS and DVSS to ground.
-3. Chooses the closest healthy code to 1.194 V at 3.3 V and **holds that same code
-   at 5 V**. Independently optimal codes are reported separately.
-4. Checks cold start and analog restart at both supplies using that held code.
+3. Chooses the closest healthy code to 1.194 V at **25 C / 3.3 V for each
+   process corner**, then **holds that code across all temperatures and supplies**.
+   Independently optimal codes are reported separately and are not used for passing.
+4. Checks cold start and analog restart at every configured V/T point using that held code.
    DVDD starts first and remains powered during analog shutdown/restart.
 
 `b0` is the LSB; a 1 bypasses its physical segment, while a 0 includes it.
@@ -365,15 +365,21 @@ The `trim_startup` per-test setting controls the same choice for GUI runs.
 Results use the existing hierarchy:
 
 ```text
-results/trim_nominal/TB10_RESISTOR_TRIM_UPLOAD_THIS.txt
-results/trim_nominal/TB10_RESISTOR_TRIM/cases/TT_T25_trim_3p3V_5V/
-results/trim_nominal/plots/
+results/full/TB10_RESISTOR_TRIM_UPLOAD_THIS.txt
+results/full/TB10_RESISTOR_TRIM/cases/<process-and-temperature>_trim/
+results/full/plots/
 ```
 
-The plotter produces case status, VREF/error/code-step curves, supply/VREF/startup
+The quick profiles use their own `results/smoke/` or `results/trim_nominal/`
+directories. Reports separate nominal supplies (3.3–5 V) from stress points
+(3.0/5.5 V with the supplied full profile). `full_PVT_qualified` remains false:
+this bench does not cover trim Monte Carlo, a dense temperature-coefficient
+sweep, trimmed PSRR/noise, DVDD loss, AVDD-first sequencing, or extracted layout.
+
+The plotter produces case status, held-code PVT summaries, VREF/error/code-step curves, supply/VREF/startup
 current waveforms, and cold/restart readiness bars. They also appear in the
 normal combined `bandgap_plots.pdf`. CSVs include common metrics,
-`TB10_RESISTOR_TRIM_trim_codes.csv` (all 256 code points), and
+`TB10_RESISTOR_TRIM_trim_codes.csv` (all completed sweep points, independent of the displayed trace limit), and
 `TB10_RESISTOR_TRIM_startup_events.csv`.
 
 Before replotting TB10, its previous generated PNGs/CSVs move to
@@ -383,8 +389,10 @@ pictures beside a newer DC-only report.
 Matching completed bundles resume using the same fingerprint/locking/report
 mechanism. Changed inputs or retries create a new `attempts/run_.../` inside
 the case folder, retaining its decks, logs, full terminal traces and DC CSV.
-TB10 intentionally retains these attempt artifacts even if `retain_waveforms`
-is false; its compact plotting traces also use the normal compressed cache.
+TB10 retains these attempt artifacts even if `retain_waveforms` is false;
+in that mode, full terminal traces are losslessly compressed as `trace.txt.gz`.
+Readiness metrics always use every adaptive timepoint; plotting traces are
+reduced to roughly 12,000 samples and use the normal compressed cache.
 This release changes runner/config fingerprints; older results are not assumed
 compatible merely because they are present.
 
