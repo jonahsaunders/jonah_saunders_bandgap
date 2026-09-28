@@ -1,8 +1,8 @@
 # Testbench reference
 
-[Back to the README](../README.md) · [Simulation guide](SIMULATION_GUIDE.md) · [Validation notes](../VALIDATION.md)
+[Overview](../README.md) · [Results](RESULTS.md) · [Testbenches](TESTBENCHES.md) · [Simulation guide](SIMULATION_GUIDE.md) · [Validation notes](../VALIDATION.md)
 
-This reference keeps the detailed measurement assumptions and circuit connections. The README provides the ordered overview of all ten benches.
+This reference keeps the detailed measurement assumptions and circuit connections. The [testbench overview](TESTBENCHES.md) describes all ten benches and their coverage.
 
 ## TB05: Loop-probe connections
 

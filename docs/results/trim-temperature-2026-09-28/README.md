@@ -66,4 +66,4 @@ python3 docs/results/trim-temperature-2026-09-28/plot_results.py
 
 The original reports, candidate decks, logs, and full traces remain in the local `results/trim_screen_2026-09-28/` and `results/trim_tc_2026-09-28/` folders. The ordinary TB10 runner still uses its documented legacy 1.194 V voltage-calibration criterion; this publication records the separate temperature-first analysis. No historical pass/fail results were relabeled.
 
-[Return to project specifications](../../../README.md#projected-post-trim-specifications)
+[All results](../../RESULTS.md) · [Project specifications](../../../README.md#specifications)

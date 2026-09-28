@@ -1,6 +1,6 @@
 # Simulation guide
 
-[Back to the README](../README.md) · [Testbench reference](TESTBENCH_DETAILS.md) · [Validation notes](../VALIDATION.md)
+[Overview](../README.md) · [Results](RESULTS.md) · [Testbenches](TESTBENCHES.md) · [Measurement details](TESTBENCH_DETAILS.md) · [Validation notes](../VALIDATION.md)
 
 Complete the README's installation and smoke check first. Run the commands below from the repository root in Bash inside the configured Linux/FOSS environment. In each new terminal, reactivate your Python environment if used and select the complete GF180 tool setup:
 
